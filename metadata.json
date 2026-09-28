@@ -1,0 +1,6 @@
+{
+  "name": "Hệ Thống Đặt Bàn Nhà Hàng",
+  "description": "Hệ thống đặt bàn trực tuyến cao cấp, chọn món trước, vé check-in QR tự động và bảng quản trị chuyên sâu phân quyền dành cho Admin và Staff.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

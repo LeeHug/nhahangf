@@ -1,0 +1,70 @@
+import { TastingCourse } from '../types';
+
+export const TASTING_COURSES: TastingCourse[] = [
+  {
+    id: 'course-royal',
+    name: 'Set Menu Hoàng Gia 5 Món',
+    subtitle: 'Royal Heritage 5-Course Tasting Experience',
+    pricePerPerson: 1280000,
+    image: 'https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=800&q=80',
+    description: 'Bản giao hưởng ẩm thực tinh tế kết hợp Bò Wagyu A5 nướng đá muối cổ đại, Trứng cá tầm Caviar và Bánh Soufflé sô-cô-la Bỉ ấm nóng.',
+    courseCount: 5,
+    dishes: [
+      { dishId: 'm-15', dishName: 'Tartare Cá Hồi Na Uy & Trứng Cá Tầm Caviar', courseRole: 'Khai vị 1 (Amuse-Bouche)' },
+      { dishId: 'm-02', dishName: 'Súp Hải Sản Nấm Bào Ngư', courseRole: 'Khai vị 2 (Potage)' },
+      { dishId: 'm-04', dishName: 'Bò Wagyu Nướng Đá Muối Himalaya', courseRole: 'Món chính Signature (Plat Principal)' },
+      { dishId: 'm-21', dishName: 'Bánh Soufflé Sô-cô-la Bỉ Nóng Chảy', courseRole: 'Tráng miệng (Dessert)' },
+      { dishId: 'm-12', dishName: 'Trà Lài Sen Vàng Macchiato', courseRole: 'Thức uống bế mạc (Digestif)' },
+    ],
+    winePairingOption: {
+      wineName: 'Vang Đỏ Chateau Bordeaux Reserve 2018',
+      wineId: 'm-13',
+      extraPricePerPerson: 290000,
+      notes: 'Tannin êm mượt tựa nhung lụa, hòa quyện xuất sắc cùng vân mỡ cẩm thạch béo ngậy của Bò Wagyu A5.',
+    },
+  },
+  {
+    id: 'course-ocean',
+    name: 'Set Menu Đại Yến Biển Sâu 6 Món',
+    subtitle: 'Ocean Grandeur 6-Course Feast',
+    pricePerPerson: 1950000,
+    image: 'https://images.unsplash.com/photo-1565680018434-b513d5e5fd47?auto=format&fit=crop&w=800&q=80',
+    description: 'Thăng hoa cùng tinh túy hải sản đại dương tươi sống: Tôm hùm bông đút lò phô mai Truffle, Cồi sò điệp Hokkaido và Rượu Champagne Pháp.',
+    courseCount: 6,
+    dishes: [
+      { dishId: 'm-03', dishName: 'Salad Rong Nho Trứng Cua Nhật', courseRole: 'Khai vị biển (Cold Appetizer)' },
+      { dishId: 'm-16', dishName: 'Gan Ngỗng Pháp Áp Chảo Xốt Vang Port', courseRole: 'Món khai vị nóng (Hot Entrée)' },
+      { dishId: 'm-20', dishName: 'Sò Điệp Nhật Hokkaido Áp Chảo Xốt Kem Truffle', courseRole: 'Món cá & hải sản (Poisson)' },
+      { dishId: 'm-07', dishName: 'Tôm Hùm Bông Nướng Phô Mai Truffle', courseRole: 'Món chính thượng hạng (Signature Main)' },
+      { dishId: 'm-22', dishName: 'Mousse Chanh Dây Tráng Gương Thủy Tinh', courseRole: 'Tráng miệng thanh tao (Entremet)' },
+      { dishId: 'm-23', dishName: 'Champagne Dom Pérignon Vintage Luminous', courseRole: 'Rượu vang sủi bọt (Sparkling Wine)' },
+    ],
+    winePairingOption: {
+      wineName: 'Champagne Dom Pérignon Vintage',
+      wineId: 'm-23',
+      extraPricePerPerson: 450000,
+      notes: 'Hàng triệu bọt sủi li ti đánh thức vị giác ngọt lành tự nhiên của Tôm hùm và Cồi sò điệp Nhật Bản.',
+    },
+  },
+  {
+    id: 'course-romantic',
+    name: 'Set Menu Hẹn Hò Lãng Mạn 4 Món',
+    subtitle: 'Candlelight Romantic Duo Course',
+    pricePerPerson: 890000,
+    image: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?auto=format&fit=crop&w=800&q=80',
+    description: 'Thiết kế riêng cho các cặp đôi nhân dịp kỷ niệm ngày cưới, sinh nhật hay buổi tối hẹn hò lãng mạn dưới ánh nến lung linh.',
+    courseCount: 4,
+    dishes: [
+      { dishId: 'm-01', dishName: 'Gỏi Bò Bóp Thấu Hạt Điều', courseRole: 'Khai vị (Appetizer)' },
+      { dishId: 'm-05', dishName: 'Sườn Cừu Úc Đút Lò Thảo Mộc', courseRole: 'Món chính (Main Dish)' },
+      { dishId: 'm-11', dishName: 'Kem Cháy Creme Brulee Hương Vani Madagascar', courseRole: 'Tráng miệng (Dessert)' },
+      { dishId: 'm-24', dishName: 'Mocktail Hoàng Hôn Sài Gòn', courseRole: 'Đồ uống (Romantic Mocktail)' },
+    ],
+    winePairingOption: {
+      wineName: 'Vang Đỏ Chateau Bordeaux Reserve',
+      wineId: 'm-13',
+      extraPricePerPerson: 180000,
+      notes: 'Hương mận đen và quả mâm xôi chín mọng cùng nốt hương vani khép lại buổi tối hẹn hò đầy ngọt ngào.',
+    },
+  },
+];
