@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { X, Calendar, Clock, User, Phone, Mail, Armchair, Users, Plus, Check } from 'lucide-react';
+import { X, Calendar, Clock, User, Phone, Mail, Armchair, Users, Plus, Check, AlertCircle } from 'lucide-react';
 import { RestaurantTable, MenuItem, SelectedDishItem } from '../../types';
 import { MENU_ITEMS } from '../../data/mockData';
 import { formatVND } from '../../services/storage';
+import { getDefaultBookingDateTime, isTimeSlotInPast } from '../../utils/dateTimeUtils';
 
 interface ManualBookingModalProps {
   tables: RestaurantTable[];
@@ -26,18 +27,19 @@ export const ManualBookingModal: React.FC<ManualBookingModalProps> = ({
   onClose,
   onSubmitManualBooking,
 }) => {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const defaultSlot = getDefaultBookingDateTime();
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [date, setDate] = useState(todayStr);
-  const [time, setTime] = useState('18:30');
+  const [date, setDate] = useState(defaultSlot.date);
+  const [time, setTime] = useState(defaultSlot.time);
   const [tableId, setTableId] = useState(tables[0]?.id || '');
   const [guestCount, setGuestCount] = useState(4);
   const [occasion, setOccasion] = useState('Tiệc tối thân mật');
   const [specialRequests, setSpecialRequests] = useState('');
   const [selectedDishes, setSelectedDishes] = useState<SelectedDishItem[]>([]);
+  const [timeWarning, setTimeWarning] = useState('');
 
   const handleAddDish = (dish: MenuItem) => {
     const existing = selectedDishes.find((item) => item.dish.id === dish.id);

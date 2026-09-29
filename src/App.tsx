@@ -33,7 +33,8 @@ import { AuthModal } from './components/Auth/AuthModal';
 import { UserProfileModal } from './components/Auth/UserProfileModal';
 import { TableSelfServiceModal } from './components/TableService/TableSelfServiceModal';
 import { CustomerReviewModal } from './components/Feedback/CustomerReviewModal';
-import { Mail, CheckCircle2, Clock, Phone, MapPin, Sparkles, ShieldCheck } from 'lucide-react';
+import { Mail, CheckCircle2, Clock, Phone, MapPin, Sparkles, ShieldCheck, Users } from 'lucide-react';
+import { getDefaultBookingDateTime, getLocalDateString } from './utils/dateTimeUtils';
 
 export default function App() {
   // Global Data States
@@ -54,13 +55,17 @@ export default function App() {
 
   // Navigation State
   const [currentView, setCurrentView] = useState<'booking' | 'admin'>('booking');
+  const [adminActiveTab, setAdminActiveTab] = useState<
+    'staff_ops' | 'reservations' | 'tables' | 'kds' | 'inventory' | 'feedback' | 'reports' | 'menu' | 'staff'
+  >('reservations');
 
-  // Customer Booking Flow States
-  const todayStr = new Date().toISOString().split('T')[0];
+  // Customer Booking Flow States - initialize with smart available date & slot
+  const defaultSlot = getDefaultBookingDateTime();
+  const todayStr = getLocalDateString(new Date());
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [maxAccessibleStep, setMaxAccessibleStep] = useState<number>(1);
-  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
-  const [selectedTime, setSelectedTime] = useState<string>('18:30');
+  const [selectedDate, setSelectedDate] = useState<string>(defaultSlot.date);
+  const [selectedTime, setSelectedTime] = useState<string>(defaultSlot.time);
   const [guestCount, setGuestCount] = useState<number>(4);
   const [selectedArea, setSelectedArea] = useState<TableArea>('main');
   const [selectedTableId, setSelectedTableId] = useState<string>('T-01');
@@ -369,24 +374,12 @@ export default function App() {
   const selectedTable = tables.find((t) => t.id === selectedTableId);
   const isAdminOrStaff = currentUser?.role === 'admin' || currentUser?.role === 'staff';
 
-  // Guard: Strictly prevent customer accounts from navigating into admin area
-  useEffect(() => {
-    if (currentUser?.role === 'customer' && currentView === 'admin') {
-      setCurrentView('booking');
-      triggerToast('Hạn Chế Quyền', 'Tài khoản khách hàng không được phép truy cập khu vực quản trị.');
-    }
-  }, [currentUser, currentView]);
-
   return (
     <div className="min-h-screen bg-stone-50 flex flex-col selection:bg-amber-200 selection:text-stone-900">
       {/* Top Navbar */}
       <Navbar
         currentView={currentView}
         onViewChange={(view) => {
-          if (view === 'admin' && currentUser?.role === 'customer') {
-            triggerToast('Hạn Chế Quyền', 'Tài khoản khách hàng không được phép truy cập khu vực quản trị.');
-            return;
-          }
           setCurrentView(view);
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
@@ -403,6 +396,11 @@ export default function App() {
         onOpenUserProfile={handleOpenUserProfile}
         onLogout={handleLogout}
         onOpenTableService={() => setIsTableServiceOpen(true)}
+        onOpenAdminTab={(tab) => {
+          setAdminActiveTab(tab as any);
+          setCurrentView('admin');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
       />
 
       {/* Real-time Email Toast Notification */}
@@ -519,6 +517,8 @@ export default function App() {
               onCreateManualReservation={handleManualBooking}
               onSaveDishesAtTable={handleSaveDishesAtTable}
               onConfirmCheckout={handleConfirmCheckout}
+              initialTab={adminActiveTab}
+              onTabChange={setAdminActiveTab}
             />
           ) : (
             <AdminAccessGate
@@ -527,8 +527,11 @@ export default function App() {
                 setCurrentView('booking');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
-              onSuccessAdminLogin={(adminUser) => {
+              onSuccessAdminLogin={(adminUser, targetTab) => {
                 setCurrentUser(adminUser);
+                if (targetTab) {
+                  setAdminActiveTab(targetTab);
+                }
                 triggerToast('Xác Thực Thành Công', `Xin chào Quản lý ${adminUser.name}. Quyền truy cập quản trị đã được kích hoạt.`);
               }}
               onLogoutAndSwitch={() => {
@@ -543,27 +546,46 @@ export default function App() {
       {/* Footer */}
       <footer className="bg-stone-900 text-stone-400 border-t border-stone-800 text-xs py-8 mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 text-center md:text-left flex-wrap justify-center md:justify-start">
             <span className="font-serif-heading text-lg font-bold text-stone-100">Le Gourmet Bistro</span>
-            <span>• 128 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh</span>
+            <span className="hidden sm:inline">•</span>
+            <span className="text-stone-400">128 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh</span>
           </div>
-          <div className="flex items-center gap-4 text-stone-400">
-            <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5 text-amber-500" /> Hotline: 0903.888.999</span>
-            <span>•</span>
-            <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-amber-500" /> Mở cửa: 10:30 - 22:30</span>
-            {currentUser?.role !== 'customer' && (
+          <div className="flex items-center gap-x-4 gap-y-2 text-stone-300 flex-wrap justify-center md:justify-end">
+            <span className="flex items-center gap-1.5 whitespace-nowrap">
+              <Phone className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span>Hotline: 0903.888.999</span>
+            </span>
+            <span className="hidden sm:inline text-stone-600">•</span>
+            <span className="flex items-center gap-1.5 whitespace-nowrap">
+              <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span>Mở cửa: 10:30 - 22:30</span>
+            </span>
+            {isAdminOrStaff && (
               <>
-                <span>•</span>
+                <span className="hidden sm:inline text-stone-600">•</span>
                 <button
                   onClick={() => {
                     setCurrentView('admin');
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  className="text-stone-500 hover:text-amber-400 flex items-center gap-1 transition-colors text-xs"
-                  title="Cổng Đăng Nhập Dành Cho Ban Quản Lý & Nhân Viên"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 hover:text-amber-400 border border-stone-700 hover:border-amber-500/50 transition text-xs whitespace-nowrap cursor-pointer shadow-xs"
+                  title="Cổng Quản Trị Dành Cho Ban Quản Lý & Nhân Viên"
                 >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Cổng Quản Trị</span>
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="font-medium">Cổng Quản Trị</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setAdminActiveTab('staff');
+                    setCurrentView('admin');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/30 transition text-xs font-semibold whitespace-nowrap cursor-pointer shadow-xs"
+                  title="Xem module Quản Lý Tài Khoản & Phân Quyền RBAC"
+                >
+                  <Users className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Quản Lý Tài Khoản</span>
                 </button>
               </>
             )}

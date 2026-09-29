@@ -25,6 +25,7 @@ import { SelectedDishItem, RestaurantTable, Reservation, UserAccount, UserVouche
 import { INITIAL_VOUCHERS } from '../../data/mockData';
 import { formatVND, downloadIcsCalendar } from '../../services/storage';
 import { CheckInBill } from './CheckInBill';
+import { isTimeSlotInPast } from '../../utils/dateTimeUtils';
 
 interface BookingConfirmationProps {
   selectedDate: string;
@@ -93,6 +94,7 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittingStepText, setSubmittingStepText] = useState('');
   const [completedReservation, setCompletedReservation] = useState<Reservation | null>(null);
+  const [timeValidationError, setTimeValidationError] = useState('');
 
   const preOrderTotal = selectedDishes.reduce((sum, item) => sum + item.dish.price * item.quantity, 0);
 
@@ -146,7 +148,15 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setTimeValidationError('');
     if (!customerName || !customerPhone || !customerEmail) return;
+
+    if (isTimeSlotInPast(selectedTime, selectedDate, 0)) {
+      setTimeValidationError(
+        `Khung giờ đặt bàn (${selectedTime} ngày ${selectedDate}) đã qua thời điểm hiện tại. Vui lòng quay lại Bước 1 để chọn khung giờ hợp lệ!`
+      );
+      return;
+    }
 
     setIsSubmitting(true);
     setSubmittingStepText('Đang ghi nhận yêu cầu đặt bàn...');
@@ -195,6 +205,25 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
   // MAIN FORM
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
+      {timeValidationError && (
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in shadow-xs">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <p className="font-bold text-rose-900">{timeValidationError}</p>
+              <p className="text-rose-700 mt-0.5">Nhà hàng không nhận đặt bàn cho các khung giờ đã trôi qua trong quá khứ.</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onPrev}
+            className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-xs transition-colors shrink-0 cursor-pointer"
+          >
+            Quay Lại Bước 1 Đổi Giờ
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left Form: Customer Details (7 cols) */}
         <div className="lg:col-span-7 space-y-6">

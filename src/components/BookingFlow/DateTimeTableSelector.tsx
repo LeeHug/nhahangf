@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Calendar, 
   Clock, 
@@ -18,6 +18,13 @@ import {
   Plus
 } from 'lucide-react';
 import { RestaurantTable, TableArea } from '../../types';
+import { 
+  isTimeSlotInPast, 
+  getLocalDateString, 
+  LUNCH_TIME_SLOTS, 
+  DINNER_TIME_SLOTS, 
+  ALL_BOOKING_SLOTS 
+} from '../../utils/dateTimeUtils';
 
 interface DateTimeTableSelectorProps {
   tables: RestaurantTable[];
@@ -58,15 +65,38 @@ export const DateTimeTableSelector: React.FC<DateTimeTableSelectorProps> = ({
 
 }) => {
   const [customTimeInput, setCustomTimeInput] = useState('');
+  const [customTimeError, setCustomTimeError] = useState('');
 
-  // Quick dates
-  const todayStr = new Date().toISOString().split('T')[0];
+  // Quick dates using local client timezone
+  const todayStr = getLocalDateString(new Date());
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+  const tomorrowStr = getLocalDateString(tomorrow);
 
-  const lunchSlots = ['11:00', '11:30', '12:00', '12:30', '13:00', '13:30'];
-  const dinnerSlots = ['17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00'];
+  const isToday = selectedDate === todayStr;
+  const isPastDate = selectedDate < todayStr;
+
+  // Check if a slot is in the past for selectedDate (10-minute preparation buffer)
+  const isSlotInPast = (slotStr: string, bufferMinutes = 10) => {
+    return isTimeSlotInPast(slotStr, selectedDate, bufferMinutes);
+  };
+
+  const allLunchPast = isToday && LUNCH_TIME_SLOTS.every(slot => isSlotInPast(slot, 10));
+  const allDinnerPast = isToday && DINNER_TIME_SLOTS.every(slot => isSlotInPast(slot, 10));
+  const allSlotsTodayPast = isToday && allLunchPast && allDinnerPast;
+
+  // Check if currently selectedTime is strictly in the past (0-min buffer)
+  const isSelectedTimeInvalid = isSlotInPast(selectedTime, 0);
+
+  // Auto-switch selectedTime to the first available valid slot if selectedTime is in the past for today
+  useEffect(() => {
+    if (isToday && isSlotInPast(selectedTime, 10)) {
+      const nextAvailableSlot = ALL_BOOKING_SLOTS.find(slot => !isSlotInPast(slot, 10));
+      if (nextAvailableSlot) {
+        onTimeChange(nextAvailableSlot);
+      }
+    }
+  }, [selectedDate, isToday, selectedTime]);
 
   const occasions = [
     { id: 'family', label: 'Bữa Ăn Gia Đình', icon: '👨‍👩‍👧‍👦' },
@@ -96,13 +126,17 @@ export const DateTimeTableSelector: React.FC<DateTimeTableSelectorProps> = ({
   const totalCombinedCapacity = primaryCap + mergedCap;
 
   const handleCustomTimeSubmit = () => {
-    if (customTimeInput) {
-      onTimeChange(customTimeInput);
-      setCustomTimeInput('');
+    setCustomTimeError('');
+    if (!customTimeInput) return;
+    if (isSlotInPast(customTimeInput, 0)) {
+      setCustomTimeError(`Giờ đến (${customTimeInput}) đã qua thời điểm hiện tại của ngày ${selectedDate}. Vui lòng chọn giờ sau thời điểm này!`);
+      return;
     }
+    onTimeChange(customTimeInput);
+    setCustomTimeInput('');
   };
 
-  const isFormValid = selectedDate && selectedTime && guestCount > 0 && selectedTableId;
+  const isFormValid = selectedDate && !isPastDate && selectedTime && !isSelectedTimeInvalid && guestCount > 0 && selectedTableId;
 
   return (
     <div className="space-y-8">
@@ -172,71 +206,148 @@ export const DateTimeTableSelector: React.FC<DateTimeTableSelectorProps> = ({
 
             {/* Khung giờ trưa */}
             <div>
-              <span className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider block mb-1.5">
-                ☀️ Buổi Trưa (11:00 - 14:00)
-              </span>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider">
+                  ☀️ Buổi Trưa (11:00 - 14:00)
+                </span>
+                {allLunchPast && (
+                  <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                    Đã qua giờ trưa hôm nay
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                {lunchSlots.map((time) => (
-                  <button
-                    key={time}
-                    type="button"
-                    onClick={() => onTimeChange(time)}
-                    className={`py-2 px-2 text-xs font-bold rounded-lg border transition-all ${
-                      selectedTime === time
-                        ? 'bg-amber-600 text-stone-950 border-amber-600 shadow-xs scale-105'
-                        : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100'
-                    }`}
-                  >
-                    {time}
-                  </button>
-                ))}
+                {LUNCH_TIME_SLOTS.map((time) => {
+                  const isPast = isSlotInPast(time);
+                  return (
+                    <button
+                      key={time}
+                      type="button"
+                      disabled={isPast}
+                      onClick={() => {
+                        setCustomTimeError('');
+                        onTimeChange(time);
+                      }}
+                      title={isPast ? `Khung giờ ${time} đã qua trong ngày hôm nay` : `Chọn giờ đến lúc ${time}`}
+                      className={`py-2 px-2 text-xs font-bold rounded-lg border transition-all ${
+                        isPast
+                          ? 'bg-stone-100 border-stone-200 text-stone-400 cursor-not-allowed line-through opacity-45 select-none'
+                          : selectedTime === time
+                          ? 'bg-amber-600 text-stone-950 border-amber-600 shadow-xs scale-105'
+                          : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100 cursor-pointer'
+                      }`}
+                    >
+                      {time}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
             {/* Khung giờ tối */}
             <div>
-              <span className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider block mb-1.5">
-                🌙 Buổi Tối (17:00 - 21:30)
-              </span>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider">
+                  🌙 Buổi Tối (17:00 - 21:30)
+                </span>
+                {allDinnerPast && (
+                  <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                    Đã qua giờ tối hôm nay
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                {dinnerSlots.map((time) => (
-                  <button
-                    key={time}
-                    type="button"
-                    onClick={() => onTimeChange(time)}
-                    className={`py-2 px-2 text-xs font-bold rounded-lg border transition-all ${
-                      selectedTime === time
-                        ? 'bg-amber-600 text-stone-950 border-amber-600 shadow-xs scale-105'
-                        : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100'
-                    }`}
-                  >
-                    {time}
-                  </button>
-                ))}
+                {DINNER_TIME_SLOTS.map((time) => {
+                  const isPast = isSlotInPast(time);
+                  return (
+                    <button
+                      key={time}
+                      type="button"
+                      disabled={isPast}
+                      onClick={() => {
+                        setCustomTimeError('');
+                        onTimeChange(time);
+                      }}
+                      title={isPast ? `Khung giờ ${time} đã qua trong ngày hôm nay` : `Chọn giờ đến lúc ${time}`}
+                      className={`py-2 px-2 text-xs font-bold rounded-lg border transition-all ${
+                        isPast
+                          ? 'bg-stone-100 border-stone-200 text-stone-400 cursor-not-allowed line-through opacity-45 select-none'
+                          : selectedTime === time
+                          ? 'bg-amber-600 text-stone-950 border-amber-600 shadow-xs scale-105'
+                          : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100 cursor-pointer'
+                      }`}
+                    >
+                      {time}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
+            {/* Banner cảnh báo nếu hôm nay đã qua hết các khung giờ */}
+            {allSlotsTodayPast && (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
+                <div className="flex items-center gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                  <div>
+                    <p className="text-xs font-bold text-stone-900">
+                      Hôm nay ({new Date().toLocaleDateString('vi-VN')}) đã qua tất cả các khung giờ nhận đặt bàn trực tuyến.
+                    </p>
+                    <p className="text-[11px] text-stone-600 mt-0.5">
+                      Quý khách vui lòng chọn Ngày Mai hoặc liên hệ Hotline để được hỗ trợ bàn trống tức thì.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDateChange(tomorrowStr);
+                    onTimeChange('18:30');
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs shadow-xs transition-colors shrink-0 cursor-pointer"
+                >
+                  👉 Chuyển sang Ngày Mai ({tomorrow.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })})
+                </button>
+              </div>
+            )}
+
             {/* Giờ tùy chọn */}
-            <div className="pt-2 flex items-center gap-2">
-              <span className="text-xs text-stone-500 whitespace-nowrap">Giờ khác:</span>
-              <input
-                type="time"
-                value={customTimeInput}
-                onChange={(e) => setCustomTimeInput(e.target.value)}
-                className="px-3 py-1.5 text-xs rounded-lg border border-stone-300 focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
-              <button
-                type="button"
-                onClick={handleCustomTimeSubmit}
-                disabled={!customTimeInput}
-                className="px-3 py-1.5 bg-stone-800 text-stone-100 text-xs rounded-lg hover:bg-stone-700 disabled:opacity-50"
-              >
-                Áp dụng
-              </button>
-              {selectedTime && (
-                <span className="text-xs font-medium text-amber-800 ml-auto bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200">
-                  Đã chọn: <strong>{selectedTime}</strong>
-                </span>
+            <div className="pt-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-stone-500 whitespace-nowrap">Giờ khác:</span>
+                <input
+                  type="time"
+                  value={customTimeInput}
+                  onChange={(e) => {
+                    setCustomTimeInput(e.target.value);
+                    setCustomTimeError('');
+                  }}
+                  className="px-3 py-1.5 text-xs rounded-lg border border-stone-300 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleCustomTimeSubmit}
+                  disabled={!customTimeInput}
+                  className="px-3 py-1.5 bg-stone-800 text-stone-100 text-xs rounded-lg hover:bg-stone-700 disabled:opacity-50 cursor-pointer font-medium"
+                >
+                  Áp dụng
+                </button>
+                {selectedTime && (
+                  <span className={`text-xs font-medium ml-auto px-2.5 py-1 rounded-md border ${
+                    isSelectedTimeInvalid
+                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
+                  }`}>
+                    Đã chọn: <strong>{selectedTime}</strong>
+                    {isSelectedTimeInvalid && ' (⚠️ Đã qua giờ!)'}
+                  </span>
+                )}
+              </div>
+              {customTimeError && (
+                <p className="text-[11px] text-rose-600 mt-1.5 font-medium flex items-center gap-1 animate-fade-in">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{customTimeError}</span>
+                </p>
               )}
             </div>
           </div>
@@ -537,6 +648,21 @@ export const DateTimeTableSelector: React.FC<DateTimeTableSelectorProps> = ({
         </div>
 
       </section>
+
+      {/* Alert if current selectedTime is in the past */}
+      {isSelectedTimeInvalid && (
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-start gap-2.5 animate-fade-in shadow-xs">
+          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-bold text-rose-900">
+              Khung giờ đã chọn ({selectedTime}) không hợp lệ vì đã trôi qua thời điểm hiện tại của ngày {new Date(selectedDate).toLocaleDateString('vi-VN')}!
+            </p>
+            <p className="text-rose-700 mt-0.5">
+              Quý khách vui lòng chọn một khung giờ hợp lệ bên trên (chưa bị gạch ngang) hoặc chuyển sang ngày mai để tiếp tục quy trình đặt bàn.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Summary Banner & Next Step Button */}
       <div className="bg-stone-900 text-stone-100 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md">

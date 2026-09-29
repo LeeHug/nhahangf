@@ -11,11 +11,11 @@ export const createPool = () => {
   if (!global._postgresPool) {
     const password = process.env.SQL_PASSWORD ?? process.env.SQL_ADMIN_PASSWORD ?? '';
     global._postgresPool = new Pool({
-      host: process.env.SQL_HOST || 'localhost',
+      host: process.env.SQL_HOST,
       port: process.env.SQL_PORT ? Number(process.env.SQL_PORT) : 5432,
       user: process.env.SQL_USER ?? process.env.SQL_ADMIN_USER ?? 'postgres',
       password: String(password),
-      database: process.env.SQL_DB_NAME || 'nhahang_db',
+      database: process.env.SQL_DB_NAME,
       max: 10,
       connectionTimeoutMillis: 15000,
     });

@@ -14,7 +14,8 @@ import {
   Clock, 
   Award, 
   ChevronDown,
-  Bell
+  Bell,
+  Users
 } from 'lucide-react';
 import { UserAccount } from '../types';
 
@@ -30,6 +31,7 @@ interface NavbarProps {
   onOpenUserProfile: (tab?: 'history' | 'rewards' | 'favorites' | 'profile') => void;
   onLogout: () => void;
   onOpenTableService?: () => void;
+  onOpenAdminTab?: (tab: 'staff' | 'reservations' | 'tables' | 'kds' | 'inventory' | 'feedback' | 'reports' | 'menu') => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -44,6 +46,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenUserProfile,
   onLogout,
   onOpenTableService,
+  onOpenAdminTab,
 }) => {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -67,75 +70,65 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Brand Logo & Name */}
           <div 
             onClick={() => onViewChange('booking')}
-            className="flex items-center gap-3 cursor-pointer group"
+            className="flex items-center gap-2 sm:gap-3 cursor-pointer group shrink-0"
           >
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center text-stone-950 shadow-lg shadow-amber-900/20 group-hover:scale-105 transition-transform duration-200">
-              <UtensilsCrossed className="w-6 h-6 text-stone-950 stroke-[2.2]" />
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center text-stone-950 shadow-lg shadow-amber-900/20 group-hover:scale-105 transition-transform duration-200 shrink-0">
+              <UtensilsCrossed className="w-5 h-5 sm:w-6 sm:h-6 text-stone-950 stroke-[2.2]" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="font-serif-heading text-xl sm:text-2xl font-bold tracking-tight text-stone-100">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <span className="font-serif-heading text-lg sm:text-2xl font-bold tracking-tight text-stone-100 whitespace-nowrap">
                   Le Gourmet Bistro
                 </span>
-                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  <Sparkles className="w-3 h-3 mr-1 text-amber-400" /> Fine Dining
+                <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
+                  <Sparkles className="w-2.5 h-2.5 mr-1 text-amber-400" /> Fine Dining
                 </span>
               </div>
-              <p className="text-xs text-stone-400 hidden sm:block">Ẩm thực thượng hạng & Đặt bàn trực tuyến</p>
+              <p className="text-[11px] text-stone-400 hidden xl:block whitespace-nowrap leading-none mt-1 tracking-wide">
+                Ẩm thực thượng hạng &amp; Đặt bàn trực tuyến
+              </p>
             </div>
           </div>
 
           {/* Main Navigation Switcher */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            {/* If Admin/Staff: show View Mode Toggle between Booking & Admin */}
-            {isAdminOrStaff ? (
-              <div className="flex bg-stone-800/90 p-1 rounded-xl border border-stone-700/60 shadow-inner">
-                <button
-                  id="nav-booking-mode-btn"
-                  onClick={() => onViewChange('booking')}
-                  className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-                    currentView === 'booking'
-                      ? 'bg-amber-600 text-stone-950 font-bold shadow-md shadow-amber-900/40'
-                      : 'text-stone-300 hover:text-stone-100 hover:bg-stone-700/50'
-                  }`}
-                >
-                  <CalendarClock className="w-4 h-4" />
-                  <span>Đặt Bàn Online</span>
-                </button>
+          <div className="flex items-center gap-1.5 sm:gap-2.5">
+            {/* View Mode Toggle: Đặt Bàn vs Quản Trị Nhà Hàng */}
+            <div className="flex bg-stone-800/90 p-1 rounded-xl border border-stone-700/60 shadow-inner">
+              <button
+                id="nav-booking-mode-btn"
+                onClick={() => onViewChange('booking')}
+                className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                  currentView === 'booking'
+                    ? 'bg-amber-600 text-stone-950 font-bold shadow-md shadow-amber-900/40'
+                    : 'text-stone-300 hover:text-stone-100 hover:bg-stone-700/50'
+                }`}
+              >
+                <CalendarClock className="w-4 h-4 shrink-0" />
+                <span className="whitespace-nowrap">Đặt Bàn</span>
+              </button>
 
+              {/* Only show Admin tab in navbar if logged in as Admin/Staff OR actively in admin view */}
+              {(isAdminOrStaff || currentView === 'admin') && (
                 <button
                   id="nav-admin-mode-btn"
                   onClick={() => onViewChange('admin')}
-                  className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all relative ${
+                  className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all relative ${
                     currentView === 'admin'
                       ? 'bg-amber-600 text-stone-950 font-bold shadow-md shadow-amber-900/40'
                       : 'text-stone-300 hover:text-stone-100 hover:bg-stone-700/50'
                   }`}
+                  title="Cổng Quản Trị Nhà Hàng (Dành cho Quản lý & Nhân viên)"
                 >
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>Quản Trị Nhà Hàng</span>
+                  <ShieldCheck className="w-4 h-4 shrink-0 text-amber-400" />
+                  <span className="whitespace-nowrap">Quản Trị</span>
                   {todayBookingsCount > 0 && (
                     <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500 text-stone-950">
                       {todayBookingsCount}
                     </span>
                   )}
                 </button>
-              </div>
-            ) : (
-              /* For regular customers / guests: Only show Booking Online */
-              <button
-                id="nav-booking-mode-btn"
-                onClick={() => onViewChange('booking')}
-                className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border transition-all ${
-                  currentView === 'booking'
-                    ? 'bg-amber-600 text-stone-950 font-bold border-amber-500 shadow-md shadow-amber-900/40'
-                    : 'bg-stone-800/80 text-stone-300 hover:text-stone-100 border-stone-700/60'
-                }`}
-              >
-                <CalendarClock className="w-4 h-4" />
-                <span>Đặt Bàn Trực Tuyến</span>
-              </button>
-            )}
+              )}
+            </div>
 
             {/* Phục Vụ Tại Bàn button */}
             {onOpenTableService && (
@@ -241,13 +234,13 @@ export const Navbar: React.FC<NavbarProps> = ({
 
                     {/* Admin Mode Shortcut if Admin/Staff */}
                     {isAdminOrStaff && (
-                      <div className="p-1.5 bg-amber-500/10 border-b border-stone-800">
+                      <div className="p-1.5 bg-amber-500/10 border-b border-stone-800 space-y-1">
                         <button
                           onClick={() => {
                             setIsUserMenuOpen(false);
                             onViewChange('admin');
                           }}
-                          className="w-full px-3 py-2 rounded-lg bg-amber-600/25 hover:bg-amber-600/35 text-amber-300 flex items-center justify-between text-xs font-bold transition-colors"
+                          className="w-full px-3 py-2 rounded-lg bg-amber-600/25 hover:bg-amber-600/35 text-amber-300 flex items-center justify-between text-xs font-bold transition-colors cursor-pointer"
                         >
                           <span className="flex items-center gap-2">
                             <ShieldCheck className="w-4 h-4 text-amber-400" />
@@ -257,6 +250,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                             Admin
                           </span>
                         </button>
+
+                        {currentUser.role === 'admin' && onOpenAdminTab && (
+                          <button
+                            onClick={() => {
+                              setIsUserMenuOpen(false);
+                              onOpenAdminTab('staff');
+                            }}
+                            className="w-full px-3 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30 flex items-center justify-between text-xs font-bold transition-colors cursor-pointer"
+                          >
+                            <span className="flex items-center gap-2">
+                              <Users className="w-4 h-4 text-amber-400" />
+                              <span>Quản Lý Tài Khoản (RBAC)</span>
+                            </span>
+                            <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-stone-950 text-[9px] font-extrabold">
+                              Xem ngay
+                            </span>
+                          </button>
+                        )}
                       </div>
                     )}
 

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
@@ -6,10 +7,25 @@ import { tables, reservations, users, emailLogs } from './src/db/schema.ts';
 import { eq, desc } from 'drizzle-orm';
 import { EXPANDED_TABLES } from './src/data/expandedTables.ts';
 import { INITIAL_RESERVATIONS, INITIAL_USERS, INITIAL_EMAIL_LOGS } from './src/data/mockData.ts';
+import { isTimeSlotInPast } from './src/utils/dateTimeUtils.ts';
 
-import 'dotenv/config';
+let localTables = [...EXPANDED_TABLES];
+let localReservations = [...INITIAL_RESERVATIONS];
+let localUsers = [...INITIAL_USERS];
+let localEmailLogs = [...INITIAL_EMAIL_LOGS];
+
+function toValidDate(val: any): Date {
+  if (!val) return new Date();
+  if (val instanceof Date) return isNaN(val.getTime()) ? new Date() : val;
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
 
 async function seedDatabaseIfEmpty() {
+  if (!process.env.SQL_HOST) {
+    console.log('ℹ️ [Database] Chế độ cục bộ: Chưa cấu hình SQL_HOST (sử dụng mock/in-memory fallback cho local dev).');
+    return;
+  }
   try {
     const existingTables = await db.select().from(tables);
     if (existingTables.length === 0) {
@@ -41,6 +57,7 @@ async function seedDatabaseIfEmpty() {
           avatar: u.avatar || null,
           favoriteDishIds: u.favoriteDishIds || [],
           dietaryPreferences: u.dietaryPreferences || '',
+          createdAt: toValidDate(u.createdAt),
         }).onConflictDoNothing();
       }
     }
@@ -74,6 +91,7 @@ async function seedDatabaseIfEmpty() {
           emailConfirmationSent: r.emailConfirmationSent ?? true,
           emailSentAt: r.emailSentAt || null,
           pointsEarned: r.pointsEarned || 0,
+          createdAt: toValidDate(r.createdAt),
         }).onConflictDoNothing();
       }
     }
@@ -95,8 +113,12 @@ async function seedDatabaseIfEmpty() {
         }).onConflictDoNothing();
       }
     }
-  } catch (err) {
-    console.error('Seed error (ignoring if DB ready):', err);
+  } catch (err: any) {
+    if (err?.cause?.code === 'ECONNREFUSED' || err?.code === 'ECONNREFUSED') {
+      console.log('ℹ️ [Database] Chế độ cục bộ: Không kết nối được PostgreSQL (đang dùng fallback in-memory).');
+    } else {
+      console.warn('Seed notice:', err?.message || err);
+    }
   }
 }
 
@@ -119,24 +141,27 @@ async function startServer() {
     try {
       const allTables = await db.select().from(tables);
       if (allTables.length === 0) {
-        return res.json(EXPANDED_TABLES);
+        return res.json(localTables);
       }
       res.json(allTables);
     } catch (error) {
-      console.error('Failed to get tables from SQL:', error);
-      res.json(EXPANDED_TABLES);
+      res.json(localTables);
     }
   });
 
   app.put('/api/tables/:id', async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
     try {
-      const { id } = req.params;
-      const updates = req.body;
       const updated = await db.update(tables).set(updates).where(eq(tables.id, id)).returning();
       res.json(updated[0] || updates);
     } catch (error) {
-      console.error('Failed to update table in SQL:', error);
-      res.status(500).json({ error: 'Failed to update table' });
+      const idx = localTables.findIndex(t => t.id === id);
+      if (idx !== -1) {
+        localTables[idx] = { ...localTables[idx], ...updates };
+        return res.json(localTables[idx]);
+      }
+      res.json(updates);
     }
   });
 
@@ -146,15 +171,52 @@ async function startServer() {
       const allRes = await db.select().from(reservations).orderBy(desc(reservations.createdAt));
       res.json(allRes);
     } catch (error) {
-      console.error('Failed to get reservations from SQL:', error);
-      res.json(INITIAL_RESERVATIONS);
+      res.json(localReservations);
     }
   });
 
   app.post('/api/reservations', async (req, res) => {
+    const newRes = req.body;
+
+    // Validate past time slots for same-day bookings
+    if (newRes.bookingDate && newRes.arrivalTime) {
+      if (isTimeSlotInPast(newRes.arrivalTime, newRes.bookingDate)) {
+        return res.status(400).json({
+          error: 'Khung giờ đặt bàn này đã trôi qua. Vui lòng chọn khung giờ hoặc ngày khác.'
+        });
+      }
+    }
+
+    const reservationData = {
+      id: newRes.id,
+      bookingCode: newRes.bookingCode,
+      userId: newRes.userId || null,
+      customerName: newRes.customerName,
+      customerPhone: newRes.customerPhone,
+      customerEmail: newRes.customerEmail,
+      guestCount: Number(newRes.guestCount) || 1,
+      bookingDate: newRes.bookingDate,
+      arrivalTime: newRes.arrivalTime,
+      tableId: newRes.tableId,
+      tableName: newRes.tableName,
+      tableArea: newRes.tableArea,
+      selectedDishes: newRes.selectedDishes || [],
+      preOrderTotal: Number(newRes.preOrderTotal) || 0,
+      depositAmount: Number(newRes.depositAmount) || 0,
+      discountAmount: Number(newRes.discountAmount) || 0,
+      voucherCode: newRes.voucherCode || null,
+      totalAmount: Number(newRes.totalAmount) || 0,
+      status: newRes.status || 'confirmed',
+      occasion: newRes.occasion || null,
+      specialRequests: newRes.specialRequests || null,
+      emailConfirmationSent: newRes.emailConfirmationSent ?? true,
+      emailSentAt: newRes.emailSentAt || null,
+      pointsEarned: Number(newRes.pointsEarned) || 0,
+      createdAt: toValidDate(newRes.createdAt),
+    };
+
     try {
-      const newRes = req.body;
-      const inserted = await db.insert(reservations).values(newRes).returning();
+      const inserted = await db.insert(reservations).values(reservationData).returning();
       
       // Update table status
       if (newRes.tableId) {
@@ -165,20 +227,31 @@ async function startServer() {
 
       res.status(201).json(inserted[0] || newRes);
     } catch (error) {
-      console.error('Failed to create reservation in SQL:', error);
-      res.status(500).json({ error: 'Failed to save reservation' });
+      const resItem = { ...reservationData, id: reservationData.id || `res_${Date.now()}` };
+      localReservations.unshift(resItem as any);
+      if (newRes.tableId) {
+        const tIdx = localTables.findIndex(t => t.id === newRes.tableId);
+        if (tIdx !== -1) {
+          localTables[tIdx] = { ...localTables[tIdx], status: 'reserved', currentReservationId: newRes.bookingCode };
+        }
+      }
+      res.status(201).json(resItem);
     }
   });
 
   app.patch('/api/reservations/:id/status', async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
     try {
-      const { id } = req.params;
-      const { status } = req.body;
       const updated = await db.update(reservations).set({ status }).where(eq(reservations.id, id)).returning();
       res.json(updated[0]);
     } catch (error) {
-      console.error('Failed to update reservation status in SQL:', error);
-      res.status(500).json({ error: 'Failed to update reservation status' });
+      const rIdx = localReservations.findIndex(r => r.id === id || (r as any).bookingCode === id);
+      if (rIdx !== -1) {
+        localReservations[rIdx] = { ...localReservations[rIdx], status: status as any };
+        return res.json(localReservations[rIdx]);
+      }
+      res.json({ id, status });
     }
   });
 
@@ -188,31 +261,46 @@ async function startServer() {
       const allUsers = await db.select().from(users);
       res.json(allUsers);
     } catch (error) {
-      console.error('Failed to get users from SQL:', error);
-      res.json(INITIAL_USERS);
+      res.json(localUsers);
     }
   });
 
   app.post('/api/users', async (req, res) => {
+    const userData = req.body;
+    const userToInsert = {
+      id: userData.id,
+      email: userData.email,
+      name: userData.name,
+      phone: userData.phone,
+      membershipTier: userData.membershipTier || 'Bạc',
+      loyaltyPoints: Number(userData.loyaltyPoints) || 0,
+      avatar: userData.avatar || null,
+      favoriteDishIds: userData.favoriteDishIds || [],
+      dietaryPreferences: userData.dietaryPreferences || '',
+      createdAt: toValidDate(userData.createdAt),
+    };
     try {
-      const userData = req.body;
-      const inserted = await db.insert(users).values(userData).returning();
+      const inserted = await db.insert(users).values(userToInsert).returning();
       res.status(201).json(inserted[0] || userData);
     } catch (error) {
-      console.error('Failed to create user in SQL:', error);
-      res.status(500).json({ error: 'Failed to save user' });
+      localUsers.push(userToInsert as any);
+      res.status(201).json(userToInsert);
     }
   });
 
   app.patch('/api/users/:id', async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
     try {
-      const { id } = req.params;
-      const updates = req.body;
       const updated = await db.update(users).set(updates).where(eq(users.id, id)).returning();
       res.json(updated[0] || updates);
     } catch (error) {
-      console.error('Failed to update user in SQL:', error);
-      res.status(500).json({ error: 'Failed to update user' });
+      const uIdx = localUsers.findIndex(u => u.id === id);
+      if (uIdx !== -1) {
+        localUsers[uIdx] = { ...localUsers[uIdx], ...updates };
+        return res.json(localUsers[uIdx]);
+      }
+      res.json(updates);
     }
   });
 
@@ -236,19 +324,29 @@ async function startServer() {
       }));
       res.json(formatted);
     } catch (error) {
-      console.error('Failed to get email logs from SQL:', error);
-      res.json(INITIAL_EMAIL_LOGS);
+      res.json(localEmailLogs);
     }
   });
 
   app.post('/api/email-logs', async (req, res) => {
+    const log = req.body;
+    const formattedLog = {
+      id: log.id,
+      recipientEmail: log.recipientEmail || log.toEmail || '',
+      recipientName: log.recipientName || log.toName || '',
+      bookingCode: log.bookingCode || '',
+      sentAt: typeof log.sentAt === 'string' ? log.sentAt : new Date().toISOString(),
+      subject: log.subject || '',
+      status: log.status || 'delivered',
+      type: log.type || 'confirmation',
+      previewBody: log.previewBody || log.htmlContent || '',
+    };
     try {
-      const log = req.body;
-      const inserted = await db.insert(emailLogs).values(log).returning();
-      res.status(201).json(inserted[0] || log);
+      const inserted = await db.insert(emailLogs).values(formattedLog).returning();
+      res.status(201).json(inserted[0] || formattedLog);
     } catch (error) {
-      console.error('Failed to save email log to SQL:', error);
-      res.status(500).json({ error: 'Failed to save email log' });
+      localEmailLogs.unshift(formattedLog as any);
+      res.status(201).json(formattedLog);
     }
   });
 

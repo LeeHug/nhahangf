@@ -11,7 +11,8 @@ import {
   Eye,
   EyeOff,
   Sparkles,
-  LogOut
+  LogOut,
+  Users
 } from 'lucide-react';
 import { UserAccount } from '../../types';
 import { loginUser } from '../../services/storage';
@@ -19,7 +20,7 @@ import { loginUser } from '../../services/storage';
 interface AdminAccessGateProps {
   currentUser: UserAccount | null;
   onBackToBooking: () => void;
-  onSuccessAdminLogin: (adminUser: UserAccount) => void;
+  onSuccessAdminLogin: (adminUser: UserAccount, targetTab?: 'staff' | 'reservations') => void;
   onLogoutAndSwitch: () => void;
 }
 
@@ -121,11 +122,34 @@ export const AdminAccessGate: React.FC<AdminAccessGateProps> = ({
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4">
               <button
                 type="button"
+                onClick={() => {
+                  const res = loginUser('admin@legourmet.vn', '123456');
+                  if (res.success && res.user) {
+                    onSuccessAdminLogin(res.user, 'staff');
+                  }
+                }}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 fill-stone-950" />
+                <span>Chuyển Sang Quyền Admin (Vào Quản Lý Tài Khoản)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onLogoutAndSwitch}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 border border-stone-700 text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Đăng Xuất Tài Khoản Này</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={onBackToBooking}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition-all"
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-transparent hover:bg-stone-800 text-stone-400 hover:text-stone-200 text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>Quay Lại Đặt Bàn Khách Hàng</span>
+                <span>Quay Lại Đặt Bàn</span>
               </button>
             </div>
           </div>
@@ -145,6 +169,36 @@ export const AdminAccessGate: React.FC<AdminAccessGateProps> = ({
               <p className="text-xs sm:text-sm text-stone-400 max-w-md mx-auto leading-relaxed">
                 Khu vực giới hạn dành riêng cho Ban Quản Lý (Admin) và Nhân Viên (Staff). Vui lòng nhập thông tin xác thực chính thức để truy cập.
               </p>
+            </div>
+
+            {/* Quick 1-Click Access to Admin / Account Management */}
+            <div className="bg-gradient-to-r from-amber-950/70 via-stone-850 to-amber-950/70 border border-amber-500/40 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-3 text-left">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 text-stone-950 font-bold flex items-center justify-center shrink-0 shadow-md">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-amber-300">
+                    Khám phá mục "Quản Lý Tài Khoản" (RBAC)
+                  </h4>
+                  <p className="text-[11px] text-stone-300 mt-0.5">
+                    Đăng nhập 1-chạm với tài khoản Tổng Quản Lý (Admin) để xem toàn bộ tài khoản, nhân sự & phân quyền.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const res = loginUser('admin@legourmet.vn', '123456');
+                  if (res.success && res.user) {
+                    onSuccessAdminLogin(res.user, 'staff');
+                  }
+                }}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md hover:scale-105 transition-all shrink-0 cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 fill-stone-950" />
+                <span>⚡ Vào Ngay Quản Lý Tài Khoản</span>
+              </button>
             </div>
 
             {errorMessage && (
@@ -225,33 +279,43 @@ export const AdminAccessGate: React.FC<AdminAccessGateProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setIdentifier('admin@legourmet.vn');
-                    setPassword('123456');
+                    const res = loginUser('admin@legourmet.vn', '123456');
+                    if (res.success && res.user) {
+                      onSuccessAdminLogin(res.user, 'staff');
+                    } else {
+                      setIdentifier('admin@legourmet.vn');
+                      setPassword('123456');
+                    }
                   }}
-                  className="p-3 rounded-xl bg-stone-800/80 hover:bg-stone-750 border border-amber-500/30 text-stone-200 transition-all text-left group cursor-pointer"
+                  className="p-3 rounded-xl bg-stone-800/80 hover:bg-stone-750 border border-amber-500/40 hover:border-amber-400 text-stone-200 transition-all text-left group cursor-pointer shadow-md"
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-bold text-amber-400 group-hover:text-amber-300">Quản Trị Viên (Admin)</span>
-                    <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold">Toàn Quyền</span>
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500 text-stone-950 text-[10px] font-bold">1-Chạm Vào Ngay</span>
                   </div>
-                  <div className="text-[11px] text-stone-400">Trần Minh Đức • admin@legourmet.vn</div>
-                  <div className="text-[10px] text-stone-500 mt-1">Báo cáo doanh thu, nhân sự, thực đơn, cấu hình bàn</div>
+                  <div className="text-[11px] text-stone-300 font-medium">Trần Minh Đức • admin@legourmet.vn</div>
+                  <div className="text-[10px] text-amber-400/80 mt-1">Toàn quyền: Quản lý tài khoản RBAC, Doanh thu, Menu, Kho</div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => {
-                    setIdentifier('staff@legourmet.vn');
-                    setPassword('123456');
+                    const res = loginUser('staff@legourmet.vn', '123456');
+                    if (res.success && res.user) {
+                      onSuccessAdminLogin(res.user);
+                    } else {
+                      setIdentifier('staff@legourmet.vn');
+                      setPassword('123456');
+                    }
                   }}
-                  className="p-3 rounded-xl bg-stone-800/80 hover:bg-stone-750 border border-blue-500/30 text-stone-200 transition-all text-left group cursor-pointer"
+                  className="p-3 rounded-xl bg-stone-800/80 hover:bg-stone-750 border border-blue-500/40 hover:border-blue-400 text-stone-200 transition-all text-left group cursor-pointer shadow-md"
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-bold text-blue-400 group-hover:text-blue-300">Nhân Viên (Staff)</span>
-                    <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[10px] font-bold">Tiếp Tân & Bàn</span>
+                    <span className="px-1.5 py-0.5 rounded bg-blue-500 text-white text-[10px] font-bold">1-Chạm Vào Ngay</span>
                   </div>
-                  <div className="text-[11px] text-stone-400">Nguyễn Văn An • staff@legourmet.vn</div>
-                  <div className="text-[10px] text-stone-500 mt-1">Check-in khách, sơ đồ bàn, gọi thêm món, thu ngân bill</div>
+                  <div className="text-[11px] text-stone-300 font-medium">Nguyễn Văn An • staff@legourmet.vn</div>
+                  <div className="text-[10px] text-blue-400/80 mt-1">Check-in khách, sơ đồ bàn, gọi thêm món, thu ngân bill</div>
                 </button>
               </div>
             </div>

@@ -296,41 +296,41 @@ export const CheckInBill: React.FC<CheckInBillProps> = ({
         </div>
 
         {/* INTERACTIVE TABLE SERVICE & REVIEW QUICK ACCESS - Hidden during print */}
-        <div className="p-4 sm:p-6 bg-gradient-to-r from-stone-900 via-stone-850 to-stone-900 text-stone-100 border-b border-stone-800 print:hidden">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5 text-center md:text-left">
-              <div className="w-11 h-11 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+        <div className="p-4 sm:p-5 bg-gradient-to-r from-stone-900 via-stone-850 to-stone-900 text-stone-100 border-b border-stone-800 print:hidden overflow-hidden">
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5 text-center sm:text-left min-w-0 flex-1">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
                 <Bell className="w-5 h-5 animate-bounce" />
               </div>
-              <div>
-                <div className="flex items-center justify-center md:justify-start gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
                     Dịch Vụ Tại Bàn {reservation.tableName}
                   </span>
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                 </div>
-                <p className="text-xs text-stone-300 mt-0.5">
+                <p className="text-xs text-stone-300 mt-0.5 line-clamp-2 sm:line-clamp-none">
                   Bấm chuông gọi phục vụ, gọi thêm rượu vang/món mới hoặc gửi đánh giá trải nghiệm ẩm thực.
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2.5 w-full md:w-auto">
+            <div className="flex items-center gap-2.5 w-full sm:w-auto shrink-0 flex-wrap justify-center sm:justify-end">
               <button
                 type="button"
                 onClick={() => setIsSelfServiceOpen(true)}
-                className="flex-1 md:flex-none px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md transition cursor-pointer"
+                className="whitespace-nowrap px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md transition cursor-pointer shrink-0"
               >
-                <Bell className="w-4 h-4" />
+                <Bell className="w-4 h-4 shrink-0" />
                 <span>Gọi Phục Vụ / Thêm Món</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setIsReviewOpen(true)}
-                className="flex-1 md:flex-none px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-amber-300 font-bold text-xs border border-amber-500/40 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                className="whitespace-nowrap px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-amber-300 font-bold text-xs border border-amber-500/40 flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
               >
-                <Star className="w-4 h-4 fill-amber-400" />
+                <Star className="w-4 h-4 fill-amber-400 shrink-0" />
                 <span>Đánh Giá Bữa Ăn</span>
               </button>
             </div>

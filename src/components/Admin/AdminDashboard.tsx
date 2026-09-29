@@ -47,6 +47,8 @@ interface AdminDashboardProps {
   onSaveDishesAtTable?: (reservationId: string, dishesToAdd: any[]) => void;
   onConfirmCheckout?: (reservationId: string, paymentDetails: any) => void;
   onSwitchUser?: (newUser: UserAccount) => void;
+  initialTab?: 'staff_ops' | 'reservations' | 'tables' | 'kds' | 'inventory' | 'feedback' | 'reports' | 'menu' | 'staff';
+  onTabChange?: (tab: 'staff_ops' | 'reservations' | 'tables' | 'kds' | 'inventory' | 'feedback' | 'reports' | 'menu' | 'staff') => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -60,17 +62,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onCreateManualReservation,
   onSaveDishesAtTable,
   onConfirmCheckout,
+  initialTab,
+  onTabChange,
 }) => {
   const isActualAdmin = currentUser?.role === 'admin';
   
   // Simulated view mode toggle for testing (Admin can preview as Staff)
   const [viewMode, setViewMode] = useState<'admin' | 'staff'>(
-    currentUser?.role === 'staff' ? 'staff' : 'admin'
+    initialTab === 'staff' || initialTab === 'reports' || initialTab === 'menu' || initialTab === 'inventory'
+      ? 'admin'
+      : currentUser?.role === 'staff' ? 'staff' : 'admin'
   );
 
   const [activeTab, setActiveTab] = useState<
     'staff_ops' | 'reservations' | 'tables' | 'kds' | 'inventory' | 'feedback' | 'reports' | 'menu' | 'staff'
-  >(currentUser?.role === 'staff' ? 'staff_ops' : 'reservations');
+  >(initialTab || (currentUser?.role === 'staff' ? 'staff_ops' : 'reservations'));
+
+  // Sync initialTab if changed externally
+  React.useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+      if (initialTab === 'staff' || initialTab === 'reports' || initialTab === 'menu' || initialTab === 'inventory') {
+        setViewMode('admin');
+      }
+    }
+  }, [initialTab]);
+
+  const handleSelectTab = (tab: 'staff_ops' | 'reservations' | 'tables' | 'kds' | 'inventory' | 'feedback' | 'reports' | 'menu' | 'staff') => {
+    setActiveTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
 
   // Live Table Service Requests state
   const [serviceRequests, setServiceRequests] = useState<TableServiceRequest[]>(() => getStoredTableServiceRequests());
@@ -184,6 +205,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span>Staff View</span>
               </button>
             </div>
+
+            {/* Quick direct access to Account Management */}
+            <button
+              type="button"
+              id="admin-header-account-btn"
+              onClick={() => {
+                setViewMode('admin');
+                handleSelectTab('staff');
+              }}
+              className={`px-3.5 py-2.5 rounded-2xl font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer shadow-md ${
+                activeTab === 'staff'
+                  ? 'bg-amber-500 text-stone-950 ring-2 ring-amber-300'
+                  : 'bg-stone-800 hover:bg-stone-750 text-amber-300 border border-amber-500/40 hover:border-amber-400'
+              }`}
+              title="Xem và quản lý tài khoản nhân viên, khách hàng và phân quyền RBAC"
+            >
+              <Users className="w-4 h-4 text-amber-400" />
+              <span>Quản Lý Tài Khoản</span>
+              <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-extrabold">
+                RBAC
+              </span>
+            </button>
 
             {onBackToBooking && (
               <button
@@ -418,19 +461,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* Tab: Account & Staff Management (Admin Only) */}
         <button
           type="button"
-          onClick={() => setActiveTab('staff')}
-          className={`py-2.5 px-3.5 rounded-xl font-bold flex items-center gap-2 transition cursor-pointer ${
+          id="admin-tab-staff-accounts-btn"
+          onClick={() => {
+            if (viewMode === 'staff') {
+              setViewMode('admin');
+            }
+            handleSelectTab('staff');
+          }}
+          className={`py-2.5 px-3.5 rounded-xl font-bold flex items-center gap-2 transition cursor-pointer border ${
             activeTab === 'staff'
-              ? 'bg-amber-600 text-stone-950 shadow-xs'
-              : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50'
-          } ${isRestrictedForStaff('staff') ? 'opacity-50' : ''}`}
+              ? 'bg-amber-600 text-stone-950 border-amber-500 shadow-md ring-1 ring-amber-400'
+              : 'text-stone-800 bg-amber-500/10 hover:bg-amber-500/20 border-amber-400/50'
+          }`}
+          title="Module Quản Lý Toàn Bộ Tài Khoản & Phân Quyền RBAC"
         >
-          <Users className="w-4 h-4" />
-          <span>Quản Lý Tài Khoản</span>
-          <span className="px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 text-[10px] font-extrabold">
+          <Users className="w-4 h-4 text-amber-700" />
+          <span className="font-extrabold text-stone-900">Quản Lý Tài Khoản</span>
+          <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-stone-950 text-[10px] font-black">
             RBAC
           </span>
-          {isRestrictedForStaff('staff') && <Lock className="w-3 h-3 text-stone-400" />}
         </button>
       </div>
 
