@@ -7,6 +7,8 @@ import { eq, desc } from 'drizzle-orm';
 import { EXPANDED_TABLES } from './src/data/expandedTables.ts';
 import { INITIAL_RESERVATIONS, INITIAL_USERS, INITIAL_EMAIL_LOGS } from './src/data/mockData.ts';
 
+import 'dotenv/config';
+
 async function seedDatabaseIfEmpty() {
   try {
     const existingTables = await db.select().from(tables);
