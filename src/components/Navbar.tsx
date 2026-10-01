@@ -64,20 +64,20 @@ export const Navbar: React.FC<NavbarProps> = ({
   }, []);
 
   return (
-    <header className="sticky top-0 z-40 bg-stone-900/95 backdrop-blur-md border-b border-stone-800 text-stone-100 shadow-md">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 sm:h-20 gap-2">
+    <header className="sticky top-0 z-40 bg-stone-900/95 backdrop-blur-md border-b border-stone-800 text-stone-100 shadow-md w-full max-w-full">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 w-full">
+        <div className="flex items-center justify-between h-14 sm:h-20 gap-1 sm:gap-2 w-full">
           {/* Brand Logo & Name */}
           <div 
             onClick={() => onViewChange('booking')}
-            className="flex items-center gap-2 sm:gap-3 cursor-pointer group shrink-0 min-w-0"
+            className="flex items-center gap-1.5 sm:gap-2.5 cursor-pointer group shrink-0 min-w-0"
           >
-            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center text-stone-950 shadow-lg shadow-amber-900/20 group-hover:scale-105 transition-transform duration-200 shrink-0">
+            <div className="w-8 h-8 sm:w-11 sm:h-11 rounded-lg sm:rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center text-stone-950 shadow-lg shadow-amber-900/20 group-hover:scale-105 transition-transform duration-200 shrink-0">
               <UtensilsCrossed className="w-4 h-4 sm:w-6 sm:h-6 text-stone-950 stroke-[2.2]" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <span className="font-serif-heading text-sm sm:text-xl lg:text-2xl font-bold tracking-tight text-stone-100 whitespace-nowrap">
+              <div className="flex items-center gap-1 sm:gap-2">
+                <span className="font-serif-heading text-sm sm:text-lg lg:text-2xl font-bold tracking-tight text-stone-100 whitespace-nowrap">
                   <span className="hidden sm:inline">Le Gourmet Bistro</span>
                   <span className="sm:hidden">Le Gourmet</span>
                 </span>
@@ -94,18 +94,19 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Main Navigation Switcher */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             {/* View Mode Toggle: Đặt Bàn vs Quản Trị Nhà Hàng */}
-            <div className="flex bg-stone-800/90 p-0.5 sm:p-1 rounded-xl border border-stone-700/60 shadow-inner">
+            <div className="flex bg-stone-800/90 p-0.5 sm:p-1 rounded-lg sm:rounded-xl border border-stone-700/60 shadow-inner">
               <button
                 id="nav-booking-mode-btn"
                 onClick={() => onViewChange('booking')}
-                className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-md sm:rounded-lg text-xs sm:text-sm font-medium transition-all ${
                   currentView === 'booking'
                     ? 'bg-amber-600 text-stone-950 font-bold shadow-md shadow-amber-900/40'
                     : 'text-stone-300 hover:text-stone-100 hover:bg-stone-700/50'
                 }`}
+                title="Chế độ Đặt Bàn"
               >
                 <CalendarClock className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                <span className="whitespace-nowrap">Đặt Bàn</span>
+                <span className="hidden md:inline whitespace-nowrap">Đặt Bàn</span>
               </button>
 
               {/* Only show Admin tab in navbar if logged in as Admin/Staff OR actively in admin view */}
@@ -113,7 +114,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   id="nav-admin-mode-btn"
                   onClick={() => onViewChange('admin')}
-                  className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all relative ${
+                  className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-md sm:rounded-lg text-xs sm:text-sm font-medium transition-all relative ${
                     currentView === 'admin'
                       ? 'bg-amber-600 text-stone-950 font-bold shadow-md shadow-amber-900/40'
                       : 'text-stone-300 hover:text-stone-100 hover:bg-stone-700/50'
@@ -121,9 +122,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title="Cổng Quản Trị Nhà Hàng (Dành cho Quản lý & Nhân viên)"
                 >
                   <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 text-amber-400" />
-                  <span className="whitespace-nowrap">Quản Trị</span>
+                  <span className="hidden md:inline whitespace-nowrap">Quản Trị</span>
                   {todayBookingsCount > 0 && (
-                    <span className="ml-1 px-1.5 py-0.2 text-[9px] sm:text-[10px] font-bold rounded-full bg-emerald-500 text-stone-950">
+                    <span className="ml-0.5 sm:ml-1 px-1 py-0.2 text-[8px] sm:text-[10px] font-bold rounded-full bg-emerald-500 text-stone-950">
                       {todayBookingsCount}
                     </span>
                   )}
@@ -136,12 +137,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 id="table-self-service-btn"
                 onClick={onOpenTableService}
-                className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/35 transition-all flex items-center gap-1 text-xs font-bold shadow-xs cursor-pointer"
+                className="p-1 sm:px-2 sm:py-1.5 rounded-lg sm:rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/35 transition-all flex items-center gap-1 text-xs font-bold shadow-xs cursor-pointer"
                 title="Cổng tự phục vụ & gọi nhân viên tại bàn"
               >
                 <Bell className="w-3.5 h-3.5 text-amber-400 animate-bounce" />
                 <span className="hidden lg:inline whitespace-nowrap">Phục Vụ Tại Bàn</span>
-                <span className="hidden sm:inline lg:hidden whitespace-nowrap">Tại Bàn</span>
+                <span className="hidden md:inline lg:hidden whitespace-nowrap">Tại Bàn</span>
               </button>
             )}
 
@@ -149,19 +150,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               id="lookup-reservation-btn"
               onClick={onOpenLookup}
-              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-stone-800/80 hover:bg-stone-700 text-stone-300 hover:text-stone-100 border border-stone-700/60 transition-colors flex items-center gap-1 text-xs font-medium"
+              className="p-1 sm:px-2 sm:py-1.5 rounded-lg sm:rounded-xl bg-stone-800/80 hover:bg-stone-700 text-stone-300 hover:text-stone-100 border border-stone-700/60 transition-colors flex items-center gap-1 text-xs font-medium"
               title="Tra cứu mã đặt bàn"
             >
               <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
               <span className="hidden md:inline whitespace-nowrap">Tra cứu</span>
             </button>
 
-            {/* Email Logs Button - Only visible to authenticated Admin/Staff */}
+            {/* Email Logs Button - Only visible on desktop/tablet to authenticated Admin/Staff */}
             {isAdminOrStaff && onOpenEmailInbox && (
               <button
                 id="email-inbox-btn"
                 onClick={onOpenEmailInbox}
-                className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-stone-800/80 hover:bg-stone-700 text-stone-300 hover:text-stone-100 border border-stone-700/60 transition-colors relative flex items-center gap-1 text-xs font-medium"
+                className="hidden md:flex p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-stone-800/80 hover:bg-stone-700 text-stone-300 hover:text-stone-100 border border-stone-700/60 transition-colors relative items-center gap-1 text-xs font-medium"
                 title="Hộp thư email tự động đã gửi (Chỉ Ban Quản Lý)"
               >
                 <Mail className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
@@ -180,23 +181,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   id="user-menu-trigger-btn"
                   onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                  className="flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-stone-800 hover:bg-stone-750 border border-amber-500/40 transition-all text-xs font-medium text-stone-200"
+                  className="flex items-center gap-1 sm:gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-lg sm:rounded-xl bg-stone-800 hover:bg-stone-750 border border-amber-500/40 transition-all text-xs font-medium text-stone-200 shrink-0"
                 >
                   {currentUser.avatar ? (
                     <img
                       src={currentUser.avatar}
                       alt={currentUser.name}
-                      className="w-7 h-7 rounded-lg object-cover border border-amber-400/40"
+                      className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg object-cover border border-amber-400/40 shrink-0"
                     />
                   ) : (
-                    <div className="w-7 h-7 rounded-lg bg-amber-600 text-stone-950 font-bold flex items-center justify-center text-xs">
+                    <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-md sm:rounded-lg bg-amber-600 text-stone-950 font-bold flex items-center justify-center text-xs shrink-0">
                       {currentUser.name.charAt(0).toUpperCase()}
                     </div>
                   )}
 
-                  <div className="hidden sm:block text-left">
+                  <div className="hidden md:block text-left">
                     <div className="flex items-center gap-1.5">
-                      <p className="font-bold text-stone-100 leading-tight whitespace-nowrap max-w-[180px] lg:max-w-[240px] truncate" title={currentUser.name}>
+                      <p className="font-bold text-stone-100 leading-tight whitespace-nowrap max-w-[160px] lg:max-w-[220px] truncate" title={currentUser.name}>
                         {currentUser.name}
                       </p>
                       {isAdminOrStaff && (
@@ -210,7 +211,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </p>
                   </div>
 
-                  <ChevronDown className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-stone-400" />
+                  <ChevronDown className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-stone-400 shrink-0" />
                 </button>
 
                 {/* Dropdown Menu */}
@@ -268,6 +269,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                             <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-stone-950 text-[9px] font-extrabold">
                               Xem ngay
                             </span>
+                          </button>
+                        )}
+
+                        {onOpenEmailInbox && (
+                          <button
+                            onClick={() => {
+                              setIsUserMenuOpen(false);
+                              onOpenEmailInbox();
+                            }}
+                            className="w-full px-3 py-2 rounded-lg bg-stone-800 hover:bg-stone-750 text-stone-300 flex items-center justify-between text-xs font-medium transition-colors cursor-pointer"
+                          >
+                            <span className="flex items-center gap-2">
+                              <Mail className="w-4 h-4 text-amber-400" />
+                              <span>Nhật Ký Email Tự Động</span>
+                            </span>
+                            {unreadEmailsCount > 0 && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-stone-950 text-[9px] font-extrabold">
+                                {unreadEmailsCount}
+                              </span>
+                            )}
                           </button>
                         )}
                       </div>

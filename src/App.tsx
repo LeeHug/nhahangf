@@ -375,7 +375,7 @@ export default function App() {
   const isAdminOrStaff = currentUser?.role === 'admin' || currentUser?.role === 'staff';
 
   return (
-    <div className="min-h-screen bg-stone-50 flex flex-col selection:bg-amber-200 selection:text-stone-900">
+    <div className="min-h-screen bg-stone-50 flex flex-col selection:bg-amber-200 selection:text-stone-900 w-full overflow-x-hidden">
       {/* Top Navbar */}
       <Navbar
         currentView={currentView}
