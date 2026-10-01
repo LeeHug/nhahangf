@@ -194,18 +194,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
                   )}
 
-                  <div className="hidden md:block text-left">
-                    <div className="flex items-center gap-1">
-                      <p className="font-bold text-stone-100 leading-tight truncate max-w-[85px] lg:max-w-[110px]">
+                  <div className="hidden sm:block text-left">
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-bold text-stone-100 leading-tight whitespace-nowrap max-w-[180px] lg:max-w-[240px] truncate" title={currentUser.name}>
                         {currentUser.name}
                       </p>
                       {isAdminOrStaff && (
-                        <span className="px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[8px] font-extrabold uppercase">
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-extrabold uppercase shrink-0">
                           Admin
                         </span>
                       )}
                     </div>
-                    <p className="text-[10px] text-amber-400 flex items-center gap-1 leading-tight">
+                    <p className="text-[10px] text-amber-400 flex items-center gap-1 leading-tight whitespace-nowrap">
                       <span>{currentUser.membershipTier}</span> • <span>{currentUser.loyaltyPoints}đ</span>
                     </p>
                   </div>
