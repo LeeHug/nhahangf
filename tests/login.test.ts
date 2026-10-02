@@ -4,10 +4,21 @@
  * Người thực hiện: Lê Hùng
  * 
  * Cách chạy:
- * npm test
- * hoặc:
- * npx tsx tests/login.test.ts
+ * 1. Chạy tất cả test case tự động:
+ *    npm test
+ * 
+ * 2. Truyền trực tiếp thông tin từ ngoài vào (CLI parameters):
+ *    npm test -- admin@legourmet.vn 123456
+ *    hoặc:
+ *    npx tsx tests/login.test.ts 0987654321 123456
+ * 
+ * 3. Chế độ nhập tay tương tác từ bàn phím (Interactive Prompt):
+ *    npm run test:nhap
+ *    hoặc:
+ *    npx tsx tests/login.test.ts --interactive
  */
+
+import readline from 'readline';
 
 // Giả lập localStorage đơn giản để chạy được trên môi trường Node.js
 const boNhoTam: Record<string, string> = {};
@@ -56,14 +67,11 @@ function kiemTraKetQua(tenTest: string, dieuKien: boolean, thongDiepLoi: string 
 // Test 1: Đăng nhập bằng Email quản trị viên (Admin)
 function test_DangNhap_Admin_Bang_Email() {
   console.log('\n--- Kiểm tra 1: Đăng nhập tài khoản Admin bằng Email ---');
-  // Dữ liệu đầu vào
   const email = 'admin@legourmet.vn';
   const matKhau = '123456';
 
-  // Thực hiện đăng nhập
   const ketQua = loginUser(email, matKhau);
 
-  // Kiểm tra
   kiemTraKetQua(
     'Admin đăng nhập thành công, nhận diện đúng quyền admin và tên Trần Minh Đức',
     ketQua.success === true && 
@@ -239,7 +247,6 @@ function test_De_Trong_Mat_Khau() {
 function test_TaiKhoan_Bi_Khoa() {
   console.log('\n--- Kiểm tra 12: Đăng nhập vào tài khoản đang bị tạm khóa ---');
   
-  // Chuẩn bị 1 tài khoản bị khóa trong danh sách
   const danhSachHienTai = getStoredUsers();
   const userBiKhoa = {
     id: 'user-test-inactive',
@@ -272,10 +279,7 @@ function test_TaiKhoan_Bi_Khoa() {
 function test_Luu_Phien_Dang_Nhap() {
   console.log('\n--- Kiểm tra 13: Kiểm tra lưu phiên làm việc sau khi login ---');
   
-  // Đăng nhập
   loginUser('admin@legourmet.vn', '123456');
-
-  // Lấy thông tin user hiện tại trong phiên
   const userHienTai = getCurrentUser();
 
   kiemTraKetQua(
@@ -289,10 +293,7 @@ function test_Luu_Phien_Dang_Nhap() {
 function test_Dang_Xuat() {
   console.log('\n--- Kiểm tra 14: Thực hiện đăng xuất tài khoản ---');
   
-  // Gọi hàm đăng xuất
   logoutUser();
-
-  // Kiểm tra lại phiên
   const userSauKhiLogout = getCurrentUser();
 
   kiemTraKetQua(
@@ -350,7 +351,7 @@ function test_Chan_Trung_Email() {
   
   const kq = registerUser({
     name: 'Người Đăng Ký Trùng',
-    email: 'admin@legourmet.vn', // Email này đã có sẵn
+    email: 'admin@legourmet.vn',
     phone: '0933998877',
     password: 'password123'
   });
@@ -370,17 +371,14 @@ function test_Chan_Trung_Email() {
 function test_KiemTra_PhanQuyen_RBAC() {
   console.log('\n--- Kiểm tra 17: Phân quyền vai trò (Admin vs Staff vs Customer) ---');
 
-  // Đăng nhập Admin
   const admin = loginUser('admin@legourmet.vn', '123456').user;
   const adminCoQuyenQuanTri = admin?.role === 'admin' || admin?.role === 'staff';
   const adminCoQuyenNhanSu = admin?.role === 'admin';
 
-  // Đăng nhập Staff
   const staff = loginUser('staff@legourmet.vn', '123456').user;
   const staffCoQuyenQuanTri = staff?.role === 'admin' || staff?.role === 'staff';
   const staffCoQuyenNhanSu = staff?.role === 'admin';
 
-  // Đăng nhập Customer
   const customer = loginUser('leehung.work03@gmail.com', '123456').user;
   const customerCoQuyenQuanTri = customer?.role === 'admin' || customer?.role === 'staff';
 
@@ -397,9 +395,94 @@ function test_KiemTra_PhanQuyen_RBAC() {
 }
 
 // =========================================================================
-// HÀM CHÍNH ĐỂ CHẠY TOÀN BỘ CÁC BÀI TEST
+// 7. TRƯỜNG HỢP KIỂM TRA VỚI THÔNG TIN NGOÀI TRUYỀN VÀO (CUSTOM EXTERNAL INPUT)
 // =========================================================================
-function chayTatCaCacBaiTest() {
+
+/**
+ * Hàm kiểm tra đăng nhập với thông tin người dùng truyền từ bên ngoài vào
+ * @param taiKhoan Email hoặc Số điện thoại người dùng nhập
+ * @param matKhau Mật khẩu người dùng nhập
+ */
+export function test_KiemTra_ThongTin_Ngoai(taiKhoan: string, matKhau: string) {
+  console.log('\n=================================================================');
+  console.log(`  KIỂM TRA ĐĂNG NHẬP VỚI THÔNG TIN TRUYỀN TỪ NGOÀI VÀO`);
+  console.log('=================================================================');
+  console.log(`> Tài khoản (Email/SĐT) : "${taiKhoan}"`);
+  console.log(`> Mật khẩu              : "${matKhau ? '******' : '(để trống)'}"`);
+
+  const ketQua = loginUser(taiKhoan, matKhau);
+
+  if (ketQua.success && ketQua.user) {
+    soTestThanhCong++;
+    console.log('\n[PASS] ĐĂNG NHẬP THÀNH CÔNG!');
+    console.log(`       - Họ và tên       : ${ketQua.user.name}`);
+    console.log(`       - Email           : ${ketQua.user.email}`);
+    console.log(`       - Số điện thoại   : ${ketQua.user.phone}`);
+    console.log(`       - Quyền hạn (Role): ${ketQua.user.role.toUpperCase()}`);
+    console.log(`       - Hạng thành viên : ${ketQua.user.membershipTier}`);
+    console.log(`       - Điểm tích lũy   : ${ketQua.user.loyaltyPoints} điểm`);
+    if (ketQua.user.position) {
+      console.log(`       - Vị trí chức vụ  : ${ketQua.user.position}`);
+    }
+  } else {
+    soTestThatBai++;
+    console.log('\n[FAIL] ĐĂNG NHẬP THẤT BÀI!');
+    console.log(`       - Thông báo từ hệ thống: ${ketQua.message}`);
+  }
+
+  return ketQua;
+}
+
+// Hàm hỗ trợ nhập tay tương tác từ bàn phím bằng readline
+function chayCheDoNhapTayTuBanPhim() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  console.log('=================================================================');
+  console.log('       CHẾ ĐỘ KIỂM THỬ ĐĂNG NHẬP TỰ NHẬP TAY TỪ BÀN PHÍM         ');
+  console.log('=================================================================');
+  console.log('Gợi ý một số tài khoản mẫu sẵn có trong hệ thống:');
+  console.log(' 1. Admin   : admin@legourmet.vn      | MK: 123456');
+  console.log(' 2. SĐT Ad  : 0903888999              | MK: 123456');
+  console.log(' 3. KH mẫu  : leehung.work03@gmail.com | MK: 123456');
+  console.log(' 4. Staff   : staff@legourmet.vn      | MK: 123456');
+  console.log('=================================================================\n');
+
+  rl.question('Nhập Email hoặc Số điện thoại: ', (taiKhoan) => {
+    rl.question('Nhập Mật khẩu               : ', (matKhau) => {
+      test_KiemTra_ThongTin_Ngoai(taiKhoan.trim(), matKhau);
+      rl.close();
+      process.exit(soTestThatBai > 0 ? 1 : 0);
+    });
+  });
+}
+
+// =========================================================================
+// HÀM CHÍNH ĐIỀU PHỐI CHẠY KIỂM THỬ
+// =========================================================================
+function chayChuongTrinh() {
+  const thamSo = process.argv.slice(2);
+
+  // Trường hợp 1: Người dùng chạy chế độ nhập tương tác từ bàn phím
+  if (thamSo.includes('--interactive') || thamSo.includes('-i') || thamSo.includes('--nhap')) {
+    chayCheDoNhapTayTuBanPhim();
+    return;
+  }
+
+  // Trường hợp 2: Người dùng truyền trực tiếp tài khoản & mật khẩu qua dòng lệnh (CLI args)
+  // Ví dụ: npm test -- admin@legourmet.vn 123456
+  // hoặc: npx tsx tests/login.test.ts 0903888999 123456
+  const thamSoKhongCoCo = thamSo.filter(arg => !arg.startsWith('-'));
+  if (thamSoKhongCoCo.length >= 2) {
+    const taiKhoanNgoai = thamSoKhongCoCo[0];
+    const matKhauNgoai = thamSoKhongCoCo[1];
+    test_KiemTra_ThongTin_Ngoai(taiKhoanNgoai, matKhauNgoai);
+    return;
+  }
+
+  // Trường hợp 3: Chạy toàn bộ bộ test tự động mặc định (17 test cases chuẩn + 1 test mẫu dữ liệu ngoài)
   console.log('=================================================================');
   console.log('      BẮT ĐẦU CHẠY KIỂM THỬ CHỨC NĂNG ĐĂNG NHẬP (CODE TAY)      ');
   console.log('=================================================================');
@@ -433,6 +516,10 @@ function chayTatCaCacBaiTest() {
   // Nhóm 6: Phân quyền
   test_KiemTra_PhanQuyen_RBAC();
 
+  // Nhóm 7: Kiểm tra trường hợp truyền thông tin ngoài vào
+  console.log('\n--- Kiểm tra 18: Trường hợp truyền tham số dữ liệu ngoài vào ---');
+  test_KiemTra_ThongTin_Ngoai('leehung.work03@gmail.com', '123456');
+
   // Tổng kết
   console.log('\n=================================================================');
   console.log('                    TỔNG KẾT KẾT QUẢ KIỂM THỬ                   ');
@@ -442,6 +529,15 @@ function chayTatCaCacBaiTest() {
   console.log(`- Số test thành công (PASS) : ${soTestThanhCong}`);
   console.log(`- Số test thất bại (FAIL)    : ${soTestThatBai}`);
   console.log(`- Tỷ lệ đạt                  : ${Math.round((soTestThanhCong / tongSo) * 100)}%`);
+
+  console.log('\n-----------------------------------------------------------------');
+  console.log('MẸO SỬ DỤNG NHẬP THÔNG TIN TỪ NGOÀI VÀO:');
+  console.log('1. Nhập trực tiếp qua dòng lệnh:');
+  console.log('   npm test -- <Email_Hoac_SDT> <MatKhau>');
+  console.log('   Ví dụ: npm test -- 0903888999 123456');
+  console.log('2. Nhập tương tác từ bàn phím:');
+  console.log('   npm run test:nhap');
+  console.log('-----------------------------------------------------------------');
 
   if (soTestThatBai === 0) {
     console.log('\n=> KẾT LUẬN: TẤT CẢ CÁC BÀI TEST ĐỀU ĐẠT CHUẨN (100% PASS)!');
@@ -453,5 +549,5 @@ function chayTatCaCacBaiTest() {
   }
 }
 
-// Gọi thực thi
-chayTatCaCacBaiTest();
+// Bắt đầu chạy
+chayChuongTrinh();
