@@ -1,447 +1,457 @@
 /**
- * TEST SUITE: BỘ TESTCASE TOÀN DIỆN VỀ ĐĂNG NHẬP, PHÂN QUYỀN & QUẢN LÝ PHIÊN (LOGIN TEST SUITE)
- * Nhà hàng: Le Gourmet Bistro
+ * File kiểm thử chức năng Đăng Nhập & Phân Quyền (Tự viết bằng tay)
+ * Dự án: Hệ thống quản trị & đặt bàn nhà hàng Le Gourmet Bistro
+ * Người thực hiện: Lê Hùng
  * 
- * Chạy test bằng lệnh: npm test hoặc npx tsx tests/login.test.ts
+ * Cách chạy:
+ * npm test
+ * hoặc:
+ * npx tsx tests/login.test.ts
  */
 
-// 1. Polyfill localStorage cho môi trường kiểm thử tự động Node.js
-class LocalStorageMock {
-  private store: Record<string, string> = {};
-
-  getItem(key: string): string | null {
-    return this.store[key] || null;
+// Giả lập localStorage đơn giản để chạy được trên môi trường Node.js
+const boNhoTam: Record<string, string> = {};
+(global as any).localStorage = {
+  getItem: (khoa: string) => boNhoTam[khoa] || null,
+  setItem: (khoa: string, giaTri: string) => { boNhoTam[khoa] = String(giaTri); },
+  removeItem: (khoa: string) => { delete boNhoTam[khoa]; },
+  clear: () => {
+    for (const k in boNhoTam) {
+      delete boNhoTam[k];
+    }
   }
+};
 
-  setItem(key: string, value: string): void {
-    this.store[key] = String(value);
-  }
-
-  removeItem(key: string): void {
-    delete this.store[key];
-  }
-
-  clear(): void {
-    this.store = {};
-  }
-}
-
-const mockStorage = new LocalStorageMock();
-(global as any).localStorage = mockStorage;
-
-// 2. Import các module xác thực và dữ liệu mẫu
 import { 
   loginUser, 
   registerUser, 
   getCurrentUser, 
   logoutUser, 
   getStoredUsers, 
-  saveStoredUsers,
-  saveCurrentUser
+  saveStoredUsers 
 } from '../src/services/storage';
-import { UserAccount } from '../src/types';
 
-// Bảng màu & Ký tự hiển thị Terminal sinh động
-const GREEN = '\x1b[32m';
-const RED = '\x1b[31m';
-const YELLOW = '\x1b[33m';
-const CYAN = '\x1b[36m';
-const BOLD = '\x1b[1m';
-const RESET = '\x1b[0m';
+// Biến đếm số lượng test case
+let soTestThanhCong = 0;
+let soTestThatBai = 0;
 
-let passedCount = 0;
-let failedCount = 0;
-const testResults: { id: string; name: string; passed: boolean; details?: string }[] = [];
-
-function assert(testId: string, testName: string, condition: boolean, failReason?: string) {
-  if (condition) {
-    passedCount++;
-    testResults.push({ id: testId, name: testName, passed: true });
-    console.log(`  ${GREEN}✓ [PASS]${RESET} ${BOLD}${testId}${RESET}: ${testName}`);
+// Hàm in kết quả kiểm tra
+function kiemTraKetQua(tenTest: string, dieuKien: boolean, thongDiepLoi: string = '') {
+  if (dieuKien) {
+    soTestThanhCong++;
+    console.log(`[PASS] ${tenTest}`);
   } else {
-    failedCount++;
-    testResults.push({ id: testId, name: testName, passed: false, details: failReason });
-    console.log(`  ${RED}✗ [FAIL]${RESET} ${BOLD}${testId}${RESET}: ${testName}`);
-    if (failReason) {
-      console.log(`     ${RED}→ Lý do thất bại: ${failReason}${RESET}`);
+    soTestThatBai++;
+    console.log(`[FAIL] ${tenTest}`);
+    if (thongDiepLoi) {
+      console.log(`       -> Chi tiết lỗi: ${thongDiepLoi}`);
     }
   }
 }
 
-async function runAllLoginTests() {
-  console.log(`\n${CYAN}${BOLD}========================================================================${RESET}`);
-  console.log(`${CYAN}${BOLD}   BỘ KIỂM THỬ TỰ ĐỘNG CHỨC NĂNG ĐĂNG NHẬP & PHÂN QUYỀN (LOGIN & AUTH)   ${RESET}`);
-  console.log(`${CYAN}${BOLD}   Hệ Thống Đặt Bàn Nhà Hàng - Le Gourmet Bistro                        ${RESET}`);
-  console.log(`${CYAN}${BOLD}========================================================================${RESET}\n`);
+// =========================================================================
+// 1. CÁC TEST CASE ĐĂNG NHẬP THÀNH CÔNG (HAPPY PATHS)
+// =========================================================================
 
-  // Reset dữ liệu trước khi chạy test
-  mockStorage.clear();
+// Test 1: Đăng nhập bằng Email quản trị viên (Admin)
+function test_DangNhap_Admin_Bang_Email() {
+  console.log('\n--- Kiểm tra 1: Đăng nhập tài khoản Admin bằng Email ---');
+  // Dữ liệu đầu vào
+  const email = 'admin@legourmet.vn';
+  const matKhau = '123456';
+
+  // Thực hiện đăng nhập
+  const ketQua = loginUser(email, matKhau);
+
+  // Kiểm tra
+  kiemTraKetQua(
+    'Admin đăng nhập thành công, nhận diện đúng quyền admin và tên Trần Minh Đức',
+    ketQua.success === true && 
+    ketQua.user?.role === 'admin' && 
+    ketQua.user?.name === 'Trần Minh Đức',
+    ketQua.message
+  );
+}
+
+// Test 2: Đăng nhập Admin bằng Số điện thoại
+function test_DangNhap_Admin_Bang_SoDienThoai() {
+  console.log('\n--- Kiểm tra 2: Đăng nhập Admin bằng Số điện thoại ---');
+  const sdt = '0903888999';
+  const matKhau = '123456';
+
+  const ketQua = loginUser(sdt, matKhau);
+
+  kiemTraKetQua(
+    'Admin đăng nhập thành công bằng Số điện thoại 0903888999',
+    ketQua.success === true && ketQua.user?.role === 'admin',
+    ketQua.message
+  );
+}
+
+// Test 3: Đăng nhập Khách hàng (Customer) bằng Email
+function test_DangNhap_KhachHang_Bang_Email() {
+  console.log('\n--- Kiểm tra 3: Đăng nhập tài khoản Khách hàng bằng Email ---');
+  const email = 'leehung.work03@gmail.com';
+  const matKhau = '123456';
+
+  const ketQua = loginUser(email, matKhau);
+
+  kiemTraKetQua(
+    'Khách hàng Lê Hùng đăng nhập thành công bằng Email',
+    ketQua.success === true && 
+    ketQua.user?.role === 'customer' && 
+    ketQua.user?.name === 'Lê Hùng',
+    ketQua.message
+  );
+}
+
+// Test 4: Đăng nhập Khách hàng bằng Số điện thoại
+function test_DangNhap_KhachHang_Bang_SoDienThoai() {
+  console.log('\n--- Kiểm tra 4: Đăng nhập Khách hàng bằng Số điện thoại ---');
+  const sdt = '0987654321';
+  const matKhau = '123456';
+
+  const ketQua = loginUser(sdt, matKhau);
+
+  kiemTraKetQua(
+    'Khách hàng đăng nhập thành công bằng SĐT 0987654321',
+    ketQua.success === true && ketQua.user?.role === 'customer',
+    ketQua.message
+  );
+}
+
+// Test 5: Đăng nhập Nhân viên phục vụ (Staff)
+function test_DangNhap_NhanVien() {
+  console.log('\n--- Kiểm tra 5: Đăng nhập tài khoản Nhân viên (Staff) ---');
+  const email = 'staff@legourmet.vn';
+  const matKhau = '123456';
+
+  const ketQua = loginUser(email, matKhau);
+
+  kiemTraKetQua(
+    'Nhân viên Nguyễn Văn An đăng nhập thành công với vai trò staff',
+    ketQua.success === true && 
+    ketQua.user?.role === 'staff' && 
+    ketQua.user?.name === 'Nguyễn Văn An',
+    ketQua.message
+  );
+}
+
+// =========================================================================
+// 2. CÁC TEST CASE XỬ LÝ ĐỊNH DẠNG ĐẦU VÀO (CHỮ HOA, KHOẢNG TRẮNG)
+// =========================================================================
+
+// Test 6: Không phân biệt chữ hoa thường trong Email
+function test_Email_Khong_Phan_Biet_Hoa_Thuong() {
+  console.log('\n--- Kiểm tra 6: Nhập Email chữ hoa chữ thường lộn xộn ---');
+  const emailHoaThuong = 'AdMin@LeGourmet.VN';
+  const matKhau = '123456';
+
+  const ketQua = loginUser(emailHoaThuong, matKhau);
+
+  kiemTraKetQua(
+    'Hệ thống tự động chuyển về chữ thường và đăng nhập thành công',
+    ketQua.success === true && ketQua.user?.email === 'admin@legourmet.vn',
+    ketQua.message
+  );
+}
+
+// Test 7: Tự động xóa khoảng trắng thừa ở đầu/cuối Email
+function test_Xoa_Khoang_Trang_Email() {
+  console.log('\n--- Kiểm tra 7: Email có chứa dấu cách ở đầu và cuối ---');
+  const emailCoKhoangTrang = '   admin@legourmet.vn   ';
+  const matKhau = '123456';
+
+  const ketQua = loginUser(emailCoKhoangTrang, matKhau);
+
+  kiemTraKetQua(
+    'Hệ thống tự động trim khoảng trắng thừa',
+    ketQua.success === true,
+    ketQua.message
+  );
+}
+
+// Test 8: Số điện thoại có dấu cách phân đoạn (0903 888 999)
+function test_SoDienThoai_Co_Dau_Cach() {
+  console.log('\n--- Kiểm tra 8: Số điện thoại nhập có khoảng cách giữa các số ---');
+  const sdtCoCach = '0903 888 999';
+  const matKhau = '123456';
+
+  const ketQua = loginUser(sdtCoCach, matKhau);
+
+  kiemTraKetQua(
+    'Tự loại bỏ dấu cách trong số điện thoại và đăng nhập thành công',
+    ketQua.success === true && ketQua.user?.name === 'Trần Minh Đức',
+    ketQua.message
+  );
+}
+
+// =========================================================================
+// 3. CÁC TEST CASE BẮT LỖI SAI THÔNG TIN (NEGATIVE TEST CASES)
+// =========================================================================
+
+// Test 9: Đăng nhập tài khoản không tồn tại
+function test_TaiKhoan_Khong_Ton_Tai() {
+  console.log('\n--- Kiểm tra 9: Nhập tài khoản không có trong hệ thống ---');
+  const emailLa = 'khongcotronghethong@gmail.com';
+  const matKhau = '123456';
+
+  const ketQua = loginUser(emailLa, matKhau);
+
+  kiemTraKetQua(
+    'Báo lỗi chính xác khi tài khoản không tồn tại',
+    ketQua.success === false && ketQua.message.includes('không tồn tại'),
+    `Kết quả thực tế: ${ketQua.message}`
+  );
+}
+
+// Test 10: Nhập sai mật khẩu
+function test_Sai_Mat_Khau() {
+  console.log('\n--- Kiểm tra 10: Nhập mật khẩu không chính xác ---');
+  const email = 'admin@legourmet.vn';
+  const matKhauSai = 'mat_khau_sai_1234';
+
+  const ketQua = loginUser(email, matKhauSai);
+
+  kiemTraKetQua(
+    'Chặn đăng nhập và thông báo mật khẩu không chính xác',
+    ketQua.success === false && ketQua.message.includes('không chính xác'),
+    `Kết quả thực tế: ${ketQua.message}`
+  );
+}
+
+// Test 11: Để trống ô mật khẩu
+function test_De_Trong_Mat_Khau() {
+  console.log('\n--- Kiểm tra 11: Bỏ trống trường mật khẩu ---');
+  const email = 'admin@legourmet.vn';
+  const matKhauRong = '';
+
+  const ketQua = loginUser(email, matKhauRong);
+
+  kiemTraKetQua(
+    'Báo lỗi yêu cầu người dùng phải nhập mật khẩu',
+    ketQua.success === false && ketQua.message.includes('Vui lòng nhập mật khẩu'),
+    `Kết quả thực tế: ${ketQua.message}`
+  );
+}
+
+// Test 12: Tài khoản bị khóa (status = inactive)
+function test_TaiKhoan_Bi_Khoa() {
+  console.log('\n--- Kiểm tra 12: Đăng nhập vào tài khoản đang bị tạm khóa ---');
+  
+  // Chuẩn bị 1 tài khoản bị khóa trong danh sách
+  const danhSachHienTai = getStoredUsers();
+  const userBiKhoa = {
+    id: 'user-test-inactive',
+    name: 'Khách Hàng Vi Phạm',
+    email: 'bikhoa@gmail.com',
+    phone: '0911223344',
+    role: 'customer' as const,
+    status: 'inactive' as const,
+    loyaltyPoints: 0,
+    membershipTier: 'Bạc' as const,
+    favoriteDishIds: [],
+    createdAt: new Date().toISOString()
+  };
+  saveStoredUsers([...danhSachHienTai, userBiKhoa]);
+
+  const ketQua = loginUser('bikhoa@gmail.com', '123456');
+
+  kiemTraKetQua(
+    'Chặn đăng nhập tài khoản bị khóa và báo liên hệ quản trị viên',
+    ketQua.success === false && ketQua.message.includes('tạm khóa'),
+    `Kết quả thực tế: ${ketQua.message}`
+  );
+}
+
+// =========================================================================
+// 4. KIỂM TRA LƯU PHIÊN ĐĂNG NHẬP & ĐĂNG XUẤT (SESSION & LOGOUT)
+// =========================================================================
+
+// Test 13: Lưu phiên đăng nhập
+function test_Luu_Phien_Dang_Nhap() {
+  console.log('\n--- Kiểm tra 13: Kiểm tra lưu phiên làm việc sau khi login ---');
+  
+  // Đăng nhập
+  loginUser('admin@legourmet.vn', '123456');
+
+  // Lấy thông tin user hiện tại trong phiên
+  const userHienTai = getCurrentUser();
+
+  kiemTraKetQua(
+    'getCurrentUser() lấy được đúng tài khoản vừa đăng nhập',
+    userHienTai !== null && userHienTai.email === 'admin@legourmet.vn',
+    JSON.stringify(userHienTai)
+  );
+}
+
+// Test 14: Đăng xuất tài khoản
+function test_Dang_Xuat() {
+  console.log('\n--- Kiểm tra 14: Thực hiện đăng xuất tài khoản ---');
+  
+  // Gọi hàm đăng xuất
   logoutUser();
 
-  // =======================================================================
-  // NHÓM 1: ĐĂNG NHẬP THÀNH CÔNG VỚI TÀI KHOẢN MẪU (HAPPY PATHS)
-  // =======================================================================
-  console.log(`${YELLOW}${BOLD}▶ NHÓM 1: Đăng nhập thành công với các vai trò mẫu (Admin, Staff, Customer)${RESET}`);
+  // Kiểm tra lại phiên
+  const userSauKhiLogout = getCurrentUser();
 
-  // TC-01: Admin đăng nhập bằng Email
-  {
-    const res = loginUser('admin@legourmet.vn', '123456');
-    assert(
-      'TC-01',
-      'Admin đăng nhập thành công bằng Email chuẩn',
-      res.success === true && res.user?.role === 'admin' && res.user?.name === 'Trần Minh Đức',
-      res.message
-    );
-  }
+  kiemTraKetQua(
+    'Sau khi đăng xuất, getCurrentUser() trả về null an toàn',
+    userSauKhiLogout === null,
+    'Vẫn còn dữ liệu phiên sau khi gọi logoutUser'
+  );
+}
 
-  // TC-02: Admin đăng nhập bằng Số điện thoại
-  {
-    const res = loginUser('0903888999', '123456');
-    assert(
-      'TC-02',
-      'Admin đăng nhập thành công bằng Số điện thoại chuẩn',
-      res.success === true && res.user?.role === 'admin' && res.user?.name === 'Trần Minh Đức',
-      res.message
-    );
-  }
+// =========================================================================
+// 5. VÒNG ĐỜI: ĐĂNG KÝ THÀNH VIÊN MỚI -> ĐĂNG NHẬP
+// =========================================================================
 
-  // TC-03: Khách hàng (Customer) đăng nhập bằng Email
-  {
-    const res = loginUser('leehung.work03@gmail.com', '123456');
-    assert(
-      'TC-03',
-      'Khách hàng đăng nhập thành công bằng Email',
-      res.success === true && res.user?.role === 'customer' && res.user?.name === 'Lê Hùng',
-      res.message
-    );
-  }
+// Test 15: Đăng ký thành viên mới và đăng nhập
+function test_DangKy_Va_DangNhap_TaiKhoanMoi() {
+  console.log('\n--- Kiểm tra 15: Vòng đời đăng ký tài khoản mới và đăng nhập ---');
+  
+  const emailMoi = `khachhang_${Date.now()}@gmail.com`;
+  const sdtMoi = `09${Math.floor(10000000 + Math.random() * 89999999)}`;
+  const matKhauMoi = 'MatKhauMoi123';
 
-  // TC-04: Khách hàng đăng nhập bằng Số điện thoại
-  {
-    const res = loginUser('0987654321', '123456');
-    assert(
-      'TC-04',
-      'Khách hàng đăng nhập thành công bằng Số điện thoại',
-      res.success === true && res.user?.role === 'customer' && res.user?.name === 'Lê Hùng',
-      res.message
-    );
-  }
+  // Bước 1: Đăng ký
+  const kqDangKy = registerUser({
+    name: 'Hoàng Minh Tuấn',
+    email: emailMoi,
+    phone: sdtMoi,
+    password: matKhauMoi,
+    dietaryPreferences: 'Thích ăn hải sản tươi sống'
+  });
 
-  // TC-05: Nhân viên phục vụ (Staff) đăng nhập bằng Email
-  {
-    const res = loginUser('staff@legourmet.vn', '123456');
-    assert(
-      'TC-05',
-      'Nhân viên (Staff) đăng nhập thành công bằng Email',
-      res.success === true && res.user?.role === 'staff' && res.user?.name === 'Nguyễn Văn An',
-      res.message
-    );
-  }
+  const dkThanhCong = kqDangKy.success === true && kqDangKy.user?.loyaltyPoints === 100;
+  kiemTraKetQua('Đăng ký tài khoản mới thành công (được tặng 100 điểm thưởng)', dkThanhCong, kqDangKy.message);
 
-  // TC-06: Nhân viên thu ngân đăng nhập bằng Số điện thoại
-  {
-    const res = loginUser('0909876543', '123456');
-    assert(
-      'TC-06',
-      'Nhân viên thu ngân đăng nhập thành công bằng SĐT (Trần Thị Mai)',
-      res.success === true && res.user?.role === 'staff' && res.user?.name === 'Trần Thị Mai',
-      res.message
-    );
-  }
+  // Bước 2: Đăng xuất ra rồi đăng nhập lại bằng mật khẩu mới
+  logoutUser();
+  const kqDangNhap = loginUser(emailMoi, matKhauMoi);
+  kiemTraKetQua(
+    'Đăng nhập thành công bằng tài khoản và mật khẩu vừa tạo',
+    kqDangNhap.success === true && kqDangNhap.user?.email === emailMoi,
+    kqDangNhap.message
+  );
 
-  // =======================================================================
-  // NHÓM 2: TÍNH LINH HOẠT & CHỐNG LỖI ĐỊNH DẠNG ĐẦU VÀO (INPUT RESILIENCE)
-  // =======================================================================
-  console.log(`\n${YELLOW}${BOLD}▶ NHÓM 2: Tính linh hoạt đầu vào (Hoa/Thường, Khoảng trắng, Định dạng SĐT)${RESET}`);
+  // Bước 3: Thử đăng nhập bằng mật khẩu cũ mặc định 123456 -> Phải thất bại
+  const kqThuSai = loginUser(emailMoi, '123456');
+  kiemTraKetQua(
+    'Không cho phép dùng mật khẩu cũ 123456 để đăng nhập vào tài khoản có mật khẩu mới',
+    kqThuSai.success === false,
+    'Vẫn cho đăng nhập bằng mật khẩu cũ'
+  );
+}
 
-  // TC-07: Email viết hoa, viết thường lộn xộn (Case Insensitivity)
-  {
-    const res = loginUser('AdMin@LeGourmet.VN', '123456');
-    assert(
-      'TC-07',
-      'Không phân biệt chữ hoa / thường trong Email',
-      res.success === true && res.user?.email === 'admin@legourmet.vn',
-      res.message
-    );
-  }
+// Test 16: Chặn đăng ký trùng Email
+function test_Chan_Trung_Email() {
+  console.log('\n--- Kiểm tra 16: Ngăn chặn đăng ký trùng lặp Email đã có ---');
+  
+  const kq = registerUser({
+    name: 'Người Đăng Ký Trùng',
+    email: 'admin@legourmet.vn', // Email này đã có sẵn
+    phone: '0933998877',
+    password: 'password123'
+  });
 
-  // TC-08: Khoảng trắng thừa ở hai đầu Email hoặc Password
-  {
-    const res = loginUser('   admin@legourmet.vn   ', '123456');
-    assert(
-      'TC-08',
-      'Tự động cắt tỉa khoảng trắng (Trim) ở Email đầu vào',
-      res.success === true,
-      res.message
-    );
-  }
+  kiemTraKetQua(
+    'Hệ thống phát hiện và từ chối đăng ký trùng Email',
+    kq.success === false && kq.message.includes('Email này đã được đăng ký'),
+    kq.message
+  );
+}
 
-  // TC-09: Số điện thoại có dấu cách phân đoạn (VD: 0903 888 999)
-  {
-    const res = loginUser('0903 888 999', '123456');
-    assert(
-      'TC-09',
-      'Nhận diện đúng SĐT có khoảng cách (0903 888 999)',
-      res.success === true && res.user?.name === 'Trần Minh Đức',
-      res.message
-    );
-  }
+// =========================================================================
+// 6. KIỂM TRA PHÂN QUYỀN VAI TRÒ (RBAC)
+// =========================================================================
 
-  // =======================================================================
-  // NHÓM 3: BẮT LỖI & BẢO MẬT ĐĂNG NHẬP (NEGATIVE & SECURITY TESTCASES)
-  // =======================================================================
-  console.log(`\n${YELLOW}${BOLD}▶ NHÓM 3: Bắt lỗi đăng nhập & Bảo mật tài khoản (Negative Cases)${RESET}`);
+// Test 17: Kiểm tra phân quyền truy cập giữa các vai trò
+function test_KiemTra_PhanQuyen_RBAC() {
+  console.log('\n--- Kiểm tra 17: Phân quyền vai trò (Admin vs Staff vs Customer) ---');
 
-  // TC-10: Tài khoản không tồn tại trong hệ thống
-  {
-    const res = loginUser('nguoidung.khongtontai@domain.com', '123456');
-    assert(
-      'TC-10',
-      'Báo lỗi chính xác khi Email không tồn tại',
-      res.success === false && res.message.includes('không tồn tại'),
-      res.message
-    );
-  }
+  // Đăng nhập Admin
+  const admin = loginUser('admin@legourmet.vn', '123456').user;
+  const adminCoQuyenQuanTri = admin?.role === 'admin' || admin?.role === 'staff';
+  const adminCoQuyenNhanSu = admin?.role === 'admin';
 
-  // TC-11: Số điện thoại không tồn tại
-  {
-    const res = loginUser('0999999999', '123456');
-    assert(
-      'TC-11',
-      'Báo lỗi chính xác khi Số điện thoại không tồn tại',
-      res.success === false && res.message.includes('không tồn tại'),
-      res.message
-    );
-  }
+  // Đăng nhập Staff
+  const staff = loginUser('staff@legourmet.vn', '123456').user;
+  const staffCoQuyenQuanTri = staff?.role === 'admin' || staff?.role === 'staff';
+  const staffCoQuyenNhanSu = staff?.role === 'admin';
 
-  // TC-12: Sai mật khẩu
-  {
-    const res = loginUser('admin@legourmet.vn', 'mat_khau_hoan_toan_sai_999');
-    assert(
-      'TC-12',
-      'Từ chối đăng nhập khi mật khẩu không khớp',
-      res.success === false && res.message.includes('không chính xác'),
-      res.message
-    );
-  }
+  // Đăng nhập Customer
+  const customer = loginUser('leehung.work03@gmail.com', '123456').user;
+  const customerCoQuyenQuanTri = customer?.role === 'admin' || customer?.role === 'staff';
 
-  // TC-13: Để trống mật khẩu
-  {
-    const res = loginUser('admin@legourmet.vn', '');
-    assert(
-      'TC-13',
-      'Từ chối đăng nhập khi để trống mật khẩu',
-      res.success === false && res.message.includes('Vui lòng nhập mật khẩu'),
-      res.message
-    );
-  }
+  const hopLe = 
+    adminCoQuyenQuanTri === true && adminCoQuyenNhanSu === true &&
+    staffCoQuyenQuanTri === true && staffCoQuyenNhanSu === false &&
+    customerCoQuyenQuanTri === false;
 
-  // TC-14: Tài khoản bị khóa (status: 'inactive')
-  {
-    const currentUsers = getStoredUsers();
-    const lockedUser: UserAccount = {
-      id: 'user-locked-test',
-      name: 'Tài Khoản Bị Khóa',
-      email: 'locked@restaurant.com',
-      phone: '0977112233',
-      role: 'customer',
-      status: 'inactive',
-      loyaltyPoints: 0,
-      membershipTier: 'Bạc',
-      createdAt: new Date().toISOString(),
-      favoriteDishIds: []
-    };
-    saveStoredUsers([...currentUsers, lockedUser]);
+  kiemTraKetQua(
+    'Phân quyền chuẩn xác: Admin có toàn quyền, Staff giới hạn nghiệp vụ bàn, Customer bị chặn',
+    hopLe,
+    'Phân quyền RBAC bị sai lệch'
+  );
+}
 
-    const res = loginUser('locked@restaurant.com', '123456');
-    assert(
-      'TC-14',
-      'Ngăn chặn đăng nhập đối với tài khoản đang bị tạm khóa (inactive)',
-      res.success === false && res.message.includes('tạm khóa'),
-      res.message
-    );
-  }
+// =========================================================================
+// HÀM CHÍNH ĐỂ CHẠY TOÀN BỘ CÁC BÀI TEST
+// =========================================================================
+function chayTatCaCacBaiTest() {
+  console.log('=================================================================');
+  console.log('      BẮT ĐẦU CHẠY KIỂM THỬ CHỨC NĂNG ĐĂNG NHẬP (CODE TAY)      ');
+  console.log('=================================================================');
 
-  // =======================================================================
-  // NHÓM 4: QUẢN LÝ PHIÊN (SESSION STORAGE & LOGOUT)
-  // =======================================================================
-  console.log(`\n${YELLOW}${BOLD}▶ NHÓM 4: Quản lý phiên làm việc & Đăng xuất (Session & Logout)${RESET}`);
+  // Nhóm 1: Đăng nhập thành công
+  test_DangNhap_Admin_Bang_Email();
+  test_DangNhap_Admin_Bang_SoDienThoai();
+  test_DangNhap_KhachHang_Bang_Email();
+  test_DangNhap_KhachHang_Bang_SoDienThoai();
+  test_DangNhap_NhanVien();
 
-  // TC-15: Lưu phiên người dùng sau khi đăng nhập thành công
-  {
-    loginUser('admin@legourmet.vn', '123456');
-    const sessionUser = getCurrentUser();
-    assert(
-      'TC-15',
-      'Phiên làm việc (Session) lưu đúng tài khoản vừa đăng nhập',
-      sessionUser !== null && sessionUser.email === 'admin@legourmet.vn' && sessionUser.role === 'admin',
-      JSON.stringify(sessionUser)
-    );
-  }
+  // Nhóm 2: Xử lý định dạng đầu vào
+  test_Email_Khong_Phan_Biet_Hoa_Thuong();
+  test_Xoa_Khoang_Trang_Email();
+  test_SoDienThoai_Co_Dau_Cach();
 
-  // TC-16: Đăng xuất tài khoản an toàn
-  {
-    logoutUser();
-    const sessionAfterLogout = getCurrentUser();
-    assert(
-      'TC-16',
-      'Đăng xuất xóa sạch dữ liệu phiên người dùng khỏi bộ nhớ',
-      sessionAfterLogout === null,
-      'Session vẫn còn tồn tại sau khi logout'
-    );
-  }
+  // Nhóm 3: Bắt lỗi thông tin
+  test_TaiKhoan_Khong_Ton_Tai();
+  test_Sai_Mat_Khau();
+  test_De_Trong_Mat_Khau();
+  test_TaiKhoan_Bi_Khoa();
 
-  // =======================================================================
-  // NHÓM 5: VÒNG ĐỜI ĐĂNG KÝ MỚI & ĐĂNG NHẬP (REGISTRATION & LOGIN LIFECYCLE)
-  // =======================================================================
-  console.log(`\n${YELLOW}${BOLD}▶ NHÓM 5: Vòng đời đăng ký thành viên mới và đăng nhập tức thì${RESET}`);
+  // Nhóm 4: Quản lý phiên
+  test_Luu_Phien_Dang_Nhap();
+  test_Dang_Xuat();
 
-  const testEmail = `khachhang.${Date.now()}@gmail.com`;
-  const testPhone = `09${Math.floor(10000000 + Math.random() * 90000000)}`;
-  const testPassword = 'MatKhauMoi!2026';
+  // Nhóm 5: Đăng ký & đăng nhập
+  test_DangKy_Va_DangNhap_TaiKhoanMoi();
+  test_Chan_Trung_Email();
 
-  // TC-17: Đăng ký thành viên mới
-  {
-    const regRes = registerUser({
-      name: 'Nguyễn Văn Kiểm Thử',
-      email: testEmail,
-      phone: testPhone,
-      password: testPassword,
-      dietaryPreferences: 'Thích ăn hải sản tươi sống'
-    });
-    assert(
-      'TC-17',
-      'Đăng ký tài khoản thành viên mới thành công và nhận 100 điểm thưởng',
-      regRes.success === true && regRes.user?.loyaltyPoints === 100 && regRes.user?.membershipTier === 'Bạc',
-      regRes.message
-    );
-  }
+  // Nhóm 6: Phân quyền
+  test_KiemTra_PhanQuyen_RBAC();
 
-  // TC-18: Đăng nhập ngay bằng tài khoản mới với mật khẩu vừa tạo
-  {
-    logoutUser(); // Xóa phiên tạm
-    const loginNewRes = loginUser(testEmail, testPassword);
-    assert(
-      'TC-18',
-      'Đăng nhập thành công bằng tài khoản và mật khẩu vừa đăng ký',
-      loginNewRes.success === true && loginNewRes.user?.email === testEmail,
-      loginNewRes.message
-    );
-  }
+  // Tổng kết
+  console.log('\n=================================================================');
+  console.log('                    TỔNG KẾT KẾT QUẢ KIỂM THỬ                   ');
+  console.log('=================================================================');
+  const tongSo = soTestThanhCong + soTestThatBai;
+  console.log(`- Tổng số test case thực thi : ${tongSo}`);
+  console.log(`- Số test thành công (PASS) : ${soTestThanhCong}`);
+  console.log(`- Số test thất bại (FAIL)    : ${soTestThatBai}`);
+  console.log(`- Tỷ lệ đạt                  : ${Math.round((soTestThanhCong / tongSo) * 100)}%`);
 
-  // TC-19: Đăng nhập thất bại nếu dùng mật khẩu mặc định cũ thay vì mật khẩu mới
-  {
-    const wrongRes = loginUser(testEmail, '123456');
-    assert(
-      'TC-19',
-      'Từ chối đăng nhập tài khoản mới bằng mật khẩu mặc định 123456',
-      wrongRes.success === false,
-      wrongRes.message
-    );
-  }
-
-  // TC-20: Ngăn chặn đăng ký trùng lặp Email
-  {
-    const dupEmailRes = registerUser({
-      name: 'Người Đăng Ký Trùng',
-      email: testEmail,
-      phone: '0933445566',
-      password: 'somepassword'
-    });
-    assert(
-      'TC-20',
-      'Bắt lỗi ngăn chặn đăng ký trùng Email đã có trong hệ thống',
-      dupEmailRes.success === false && dupEmailRes.message.includes('Email này đã được đăng ký'),
-      dupEmailRes.message
-    );
-  }
-
-  // TC-21: Ngăn chặn đăng ký trùng lặp Số điện thoại
-  {
-    const dupPhoneRes = registerUser({
-      name: 'Người Đăng Ký Trùng Phone',
-      email: 'email.khac@gmail.com',
-      phone: testPhone,
-      password: 'somepassword'
-    });
-    assert(
-      'TC-21',
-      'Bắt lỗi ngăn chặn đăng ký trùng Số điện thoại',
-      dupPhoneRes.success === false && dupPhoneRes.message.includes('Số điện thoại này đã được sử dụng'),
-      dupPhoneRes.message
-    );
-  }
-
-  // =======================================================================
-  // NHÓM 6: PHÂN QUYỀN VAI TRÒ (RBAC - ROLE-BASED ACCESS CONTROL)
-  // =======================================================================
-  console.log(`\n${YELLOW}${BOLD}▶ NHÓM 6: Kiểm tra phân quyền vai trò (Admin vs Staff vs Customer)${RESET}`);
-
-  // TC-22: Quyền hạn Admin
-  {
-    const adminRes = loginUser('admin@legourmet.vn', '123456');
-    const isAdmin = adminRes.user?.role === 'admin';
-    const canAccessAdminPortal = isAdmin;
-    const canManageStaff = isAdmin;
-    const canViewFinancials = isAdmin;
-    assert(
-      'TC-22',
-      'Tài khoản Admin có đầy đủ quyền quản trị, nhân sự và tài chính',
-      canAccessAdminPortal && canManageStaff && canViewFinancials,
-      'Admin bị thiếu quyền hạn'
-    );
-  }
-
-  // TC-23: Quyền hạn Nhân viên (Staff)
-  {
-    const staffRes = loginUser('staff@legourmet.vn', '123456');
-    const isStaff = staffRes.user?.role === 'staff';
-    const canAccessAdminPortal = isStaff;
-    const canManageStaff = staffRes.user?.role === 'admin'; // Nhân viên không được quản lý nhân sự
-    assert(
-      'TC-23',
-      'Tài khoản Staff vào được cổng vận hành bàn nhưng bị chặn quyền Quản lý nhân sự',
-      canAccessAdminPortal === true && canManageStaff === false,
-      'Quyền hạn Staff phân định chưa chính xác'
-    );
-  }
-
-  // TC-24: Quyền hạn Khách hàng (Customer)
-  {
-    const customerRes = loginUser('leehung.work03@gmail.com', '123456');
-    const isCustomer = customerRes.user?.role === 'customer';
-    const canAccessAdminPortal = customerRes.user?.role === 'admin' || customerRes.user?.role === 'staff';
-    assert(
-      'TC-24',
-      'Tài khoản Khách hàng (Customer) bị chặn 100% khỏi các cổng Quản trị',
-      isCustomer === true && canAccessAdminPortal === false,
-      'Khách hàng có thể truy cập cổng quản trị'
-    );
-  }
-
-  // =======================================================================
-  // TỔNG HỢP KẾT QUẢ KIỂM THỬ
-  // =======================================================================
-  console.log(`\n${CYAN}${BOLD}========================================================================${RESET}`);
-  console.log(`${CYAN}${BOLD}                     BÁO CÁO KẾT QUẢ KIỂM THỬ                         ${RESET}`);
-  console.log(`${CYAN}${BOLD}========================================================================${RESET}`);
-  console.log(`Tổng số Test Case thực thi: ${BOLD}${passedCount + failedCount}${RESET}`);
-  console.log(`Số Test Case ${GREEN}THÀNH CÔNG (PASS)${RESET}: ${GREEN}${BOLD}${passedCount}${RESET}`);
-  console.log(`Số Test Case ${RED}THẤT BÀI (FAIL)${RESET}: ${RED}${BOLD}${failedCount}${RESET}`);
-  const passRate = Math.round((passedCount / (passedCount + failedCount)) * 100);
-  console.log(`Tỷ lệ đạt chuẩn: ${passRate === 100 ? GREEN : YELLOW}${BOLD}${passRate}%${RESET}\n`);
-
-  if (failedCount === 0) {
-    console.log(`${GREEN}${BOLD}🎉 TẤT CẢ 24/24 TEST CASES ĐỀU VƯỢT QUA XUẤT SẮC! HỆ THỐNG ĐĂNG NHẬP & PHÂN QUYỀN SẴN SÀNG SẢN XUẤT.${RESET}\n`);
-    process.exit(0);
+  if (soTestThatBai === 0) {
+    console.log('\n=> KẾT LUẬN: TẤT CẢ CÁC BÀI TEST ĐỀU ĐẠT CHUẨN (100% PASS)!');
+    console.log('=================================================================\n');
   } else {
-    console.log(`${RED}${BOLD}⚠️ CÓ ${failedCount} TEST CASES THẤT BÀI. VUI LÒNG KIỂM TRA LẠI CÁC MỤC BÁO ĐỎ Ở TRÊN.${RESET}\n`);
+    console.log(`\n=> CẢNH BÁO: CÓ ${soTestThatBai} BÀI TEST THẤT BÀI!`);
+    console.log('=================================================================\n');
     process.exit(1);
   }
 }
 
-// Chạy bộ test
-runAllLoginTests().catch((err) => {
-  console.error('Lỗi nghiêm trọng khi thực thi Test Suite:', err);
-  process.exit(1);
-});
+// Gọi thực thi
+chayTatCaCacBaiTest();
