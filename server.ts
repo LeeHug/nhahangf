@@ -350,7 +350,7 @@ async function startServer() {
   });
 
   // Vite middleware for development (only when not running from bundled dist)
-  const isProduction = process.env.NODE_ENV === 'production' || (typeof __dirname !== 'undefined' && __dirname.includes('dist'));
+  const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.argv[1] && process.argv[1].includes('dist'));
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
