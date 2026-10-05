@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
 import { db } from './src/db/index.ts';
 import { tables, reservations, users, emailLogs } from './src/db/schema.ts';
 import { eq, desc } from 'drizzle-orm';
@@ -350,8 +349,10 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== 'production') {
+  // Vite middleware for development (only when not running from bundled dist)
+  const isProduction = process.env.NODE_ENV === 'production' || __dirname.includes('dist');
+  if (!isProduction) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
