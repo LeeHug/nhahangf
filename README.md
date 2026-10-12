@@ -141,7 +141,7 @@ Hệ thống báo cáo và quản trị toàn diện dành cho Quản lý nhà h
 
 ### Yêu cầu tiên quyết
 - [Node.js](https://nodejs.org/) phiên bản 18 trở lên
-- npm hoặc yarn/bun
+- npm (đi kèm sẵn khi cài đặt Node.js)
 
 ### Cài đặt
 1. **Clone repository về máy:**
