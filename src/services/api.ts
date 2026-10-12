@@ -1,6 +1,79 @@
 import { Reservation, RestaurantTable, SentEmailLog, UserAccount } from '../types';
 
+const AUTH_TOKEN_KEY = 'restaurant_auth_jwt_token_v1';
+
+export function getStoredAuthToken(): string | null {
+  try {
+    return localStorage.getItem(AUTH_TOKEN_KEY);
+  } catch (e) {
+    return null;
+  }
+}
+
+export function saveStoredAuthToken(token: string | null): void {
+  try {
+    if (token) {
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+    }
+  } catch (e) {
+    console.error('Failed to save auth token', e);
+  }
+}
+
+function getAuthHeaders(): HeadersInit {
+  const token = getStoredAuthToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export const apiService = {
+  // Auth API
+  async login(identifier: string, password?: string): Promise<{ success: boolean; token?: string; user?: UserAccount; message?: string }> {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, message: data.error || 'Đăng nhập không thành công.' };
+      }
+      if (data.token) {
+        saveStoredAuthToken(data.token);
+      }
+      return { success: true, token: data.token, user: data.user, message: data.message };
+    } catch (e: any) {
+      console.warn('Backend login unavailable, fallback error:', e);
+      return { success: false, message: 'Không thể kết nối đến máy chủ xác thực.' };
+    }
+  },
+
+  async verifyCurrentUser(): Promise<UserAccount | null> {
+    const token = getStoredAuthToken();
+    if (!token) return null;
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) {
+        saveStoredAuthToken(null);
+        return null;
+      }
+      const data = await res.json();
+      return data.user || null;
+    } catch (e) {
+      return null;
+    }
+  },
+
   // Tables
   async getTables(): Promise<RestaurantTable[]> {
     try {
@@ -17,7 +90,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/tables/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(updates),
       });
       if (!res.ok) throw new Error('API error');
@@ -31,7 +104,9 @@ export const apiService = {
   // Reservations
   async getReservations(): Promise<Reservation[]> {
     try {
-      const res = await fetch('/api/reservations');
+      const res = await fetch('/api/reservations', {
+        headers: getAuthHeaders(),
+      });
       if (!res.ok) throw new Error('API error');
       return await res.json();
     } catch (e) {
@@ -47,10 +122,28 @@ export const apiService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reservation),
       });
-      if (!res.ok) throw new Error('API error');
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'API error');
+      }
       return await res.json();
     } catch (e) {
       console.warn('Failed to sync reservation to SQL', e);
+      return null;
+    }
+  },
+
+  async lookupReservation(bookingCode: string, phone: string): Promise<Reservation | null> {
+    try {
+      const res = await fetch('/api/reservations/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingCode, phone }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.reservation || null;
+    } catch (e) {
       return null;
     }
   },
@@ -59,7 +152,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/reservations/${id}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ status }),
       });
       if (!res.ok) throw new Error('API error');
@@ -73,7 +166,9 @@ export const apiService = {
   // Users
   async getUsers(): Promise<UserAccount[]> {
     try {
-      const res = await fetch('/api/users');
+      const res = await fetch('/api/users', {
+        headers: getAuthHeaders(),
+      });
       if (!res.ok) throw new Error('API error');
       return await res.json();
     } catch (e) {
@@ -100,7 +195,9 @@ export const apiService = {
   // Email logs
   async getEmailLogs(): Promise<SentEmailLog[]> {
     try {
-      const res = await fetch('/api/email-logs');
+      const res = await fetch('/api/email-logs', {
+        headers: getAuthHeaders(),
+      });
       if (!res.ok) throw new Error('API error');
       const data = await res.json();
       return (data || []).map((item: any) => ({

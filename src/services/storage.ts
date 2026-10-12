@@ -209,6 +209,11 @@ export function registerUser(data: {
 
 export function logoutUser(): void {
   saveCurrentUser(null);
+  try {
+    localStorage.removeItem('restaurant_auth_jwt_token_v1');
+  } catch (e) {
+    // ignore
+  }
 }
 
 export function updateUserProfile(userId: string, updates: Partial<UserAccount>): UserAccount | null {

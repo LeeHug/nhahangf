@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { UserAccount } from '../../types';
 import { loginUser, registerUser, resetUserPassword } from '../../services/storage';
+import { apiService } from '../../services/api';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -61,11 +62,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleQuickLogin = (email: string, pass: string = '123456') => {
+  const handleQuickLogin = async (email: string, pass: string = '123456') => {
     setErrorMessage('');
     setSuccessMessage('');
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      const serverAuth = await apiService.login(email, pass);
+      if (serverAuth.success && serverAuth.user) {
+        setIsLoading(false);
+        onSuccessLogin(serverAuth.user, serverAuth.message || 'Đăng nhập thành công!');
+        onClose();
+        return;
+      }
       const res = loginUser(email, pass);
       setIsLoading(false);
       if (res.success && res.user) {
@@ -74,10 +82,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       } else {
         setErrorMessage(res.message);
       }
-    }, 300);
+    } catch (e: any) {
+      setIsLoading(false);
+      setErrorMessage(e?.message || 'Có lỗi xảy ra.');
+    }
   };
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
@@ -88,16 +99,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      const serverAuth = await apiService.login(loginIdentifier, loginPassword || '123456');
+      if (serverAuth.success && serverAuth.user) {
+        setIsLoading(false);
+        onSuccessLogin(serverAuth.user, serverAuth.message || 'Đăng nhập thành công!');
+        onClose();
+        return;
+      }
+
       const res = loginUser(loginIdentifier, loginPassword || '123456');
       setIsLoading(false);
       if (res.success && res.user) {
         onSuccessLogin(res.user, res.message);
         onClose();
       } else {
-        setErrorMessage(res.message);
+        setErrorMessage(serverAuth.message || res.message);
       }
-    }, 400);
+    } catch (err: any) {
+      setIsLoading(false);
+      setErrorMessage(err?.message || 'Có lỗi xảy ra.');
+    }
   };
 
   const handleRegisterSubmit = (e: React.FormEvent) => {

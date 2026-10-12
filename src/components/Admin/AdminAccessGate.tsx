@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { UserAccount } from '../../types';
 import { loginUser } from '../../services/storage';
+import { apiService } from '../../services/api';
 
 interface AdminAccessGateProps {
   currentUser: UserAccount | null;
@@ -39,7 +40,7 @@ export const AdminAccessGate: React.FC<AdminAccessGateProps> = ({
   // If user is logged in as a normal customer
   const isCustomer = currentUser && currentUser.role === 'customer';
 
-  const handleAdminLogin = (e: React.FormEvent) => {
+  const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -54,12 +55,27 @@ export const AdminAccessGate: React.FC<AdminAccessGateProps> = ({
     }
 
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      // 1. Thử xác thực bảo mật thông qua Server API (nhận JWT Token)
+      const serverAuth = await apiService.login(identifier.trim(), password);
+      if (serverAuth.success && serverAuth.user) {
+        setIsLoading(false);
+        if (serverAuth.user.role !== 'admin' && serverAuth.user.role !== 'staff') {
+          setErrorMessage(
+            `Tài khoản "${serverAuth.user.name}" có vai trò là Khách Hàng (Customer), không được cấp quyền truy cập Khu Quản Trị Nhà Hàng!`
+          );
+          return;
+        }
+        onSuccessAdminLogin(serverAuth.user);
+        return;
+      }
+
+      // 2. Fallback local nếu server không phản hồi
       const res = loginUser(identifier.trim(), password);
       setIsLoading(false);
 
       if (!res.success || !res.user) {
-        setErrorMessage(res.message || 'Tài khoản hoặc mật khẩu không chính xác!');
+        setErrorMessage(serverAuth.message || res.message || 'Tài khoản hoặc mật khẩu không chính xác!');
         return;
       }
 
@@ -73,7 +89,10 @@ export const AdminAccessGate: React.FC<AdminAccessGateProps> = ({
 
       // Successful admin login
       onSuccessAdminLogin(res.user);
-    }, 400);
+    } catch (err: any) {
+      setIsLoading(false);
+      setErrorMessage(err?.message || 'Có lỗi xảy ra khi xác thực!');
+    }
   };
 
   return (
@@ -188,7 +207,12 @@ export const AdminAccessGate: React.FC<AdminAccessGateProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
+                  const serverAuth = await apiService.login('admin@legourmet.vn', '123456');
+                  if (serverAuth.success && serverAuth.user) {
+                    onSuccessAdminLogin(serverAuth.user, 'staff');
+                    return;
+                  }
                   const res = loginUser('admin@legourmet.vn', '123456');
                   if (res.success && res.user) {
                     onSuccessAdminLogin(res.user, 'staff');
