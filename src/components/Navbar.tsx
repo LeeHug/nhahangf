@@ -15,13 +15,14 @@ import {
   Award, 
   ChevronDown,
   Bell,
-  Users
+  Users,
+  BookOpen
 } from 'lucide-react';
 import { UserAccount } from '../types';
 
 interface NavbarProps {
-  currentView: 'booking' | 'admin';
-  onViewChange: (view: 'booking' | 'admin') => void;
+  currentView: 'booking' | 'menu' | 'admin';
+  onViewChange: (view: 'booking' | 'menu' | 'admin') => void;
   onOpenLookup: () => void;
   onOpenEmailInbox: () => void;
   unreadEmailsCount: number;
@@ -106,7 +107,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                 title="Chế độ Đặt Bàn Trực Tuyến"
               >
                 <CalendarClock className="w-4 h-4 shrink-0" />
-                <span className="hidden xl:inline whitespace-nowrap">Đặt Bàn</span>
+                <span className="hidden sm:inline whitespace-nowrap">Đặt Bàn</span>
+              </button>
+
+              <button
+                id="nav-menu-mode-btn"
+                onClick={() => onViewChange('menu')}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                  currentView === 'menu'
+                    ? 'bg-amber-600 text-stone-950 font-bold shadow-md shadow-amber-900/40'
+                    : 'text-stone-300 hover:text-stone-100 hover:bg-stone-700/50'
+                }`}
+                title="Xem Trước Thực Đơn & Bảng Giá Món Ăn"
+              >
+                <BookOpen className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline whitespace-nowrap">Thực Đơn</span>
               </button>
 
               {/* Only show Admin tab in navbar if logged in as Admin/Staff OR actively in admin view */}

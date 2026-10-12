@@ -15,7 +15,8 @@ import {
   deleteEmailLog,
   clearAllEmailLogs,
   addDishesToReservation,
-  checkoutAndSettleReservation
+  checkoutAndSettleReservation,
+  getStoredMenuItems
 } from './services/storage';
 import { apiService } from './services/api';
 import { Reservation, RestaurantTable, SentEmailLog, SelectedDishItem, TableArea, ReservationStatus, TableStatus, MenuItem, UserAccount } from './types';
@@ -24,6 +25,7 @@ import { StepIndicator } from './components/BookingFlow/StepIndicator';
 import { DateTimeTableSelector } from './components/BookingFlow/DateTimeTableSelector';
 import { MenuSelector } from './components/BookingFlow/MenuSelector';
 import { BookingConfirmation } from './components/BookingFlow/BookingConfirmation';
+import { PublicMenuPreview } from './components/Menu/PublicMenuPreview';
 import { AdminDashboard } from './components/Admin/AdminDashboard';
 import { AdminAccessGate } from './components/Admin/AdminAccessGate';
 import { EmailModal } from './components/EmailModal';
@@ -33,7 +35,7 @@ import { AuthModal } from './components/Auth/AuthModal';
 import { UserProfileModal } from './components/Auth/UserProfileModal';
 import { TableSelfServiceModal } from './components/TableService/TableSelfServiceModal';
 import { CustomerReviewModal } from './components/Feedback/CustomerReviewModal';
-import { Mail, CheckCircle2, Clock, Phone, MapPin, Sparkles, ShieldCheck, Users } from 'lucide-react';
+import { Mail, CheckCircle2, Clock, Phone, MapPin, Sparkles, ShieldCheck, Users, BookOpen } from 'lucide-react';
 import { getDefaultBookingDateTime, getLocalDateString } from './utils/dateTimeUtils';
 
 export default function App() {
@@ -54,7 +56,7 @@ export default function App() {
   const [userProfileTab, setUserProfileTab] = useState<'history' | 'rewards' | 'favorites' | 'profile'>('history');
 
   // Navigation State
-  const [currentView, setCurrentView] = useState<'booking' | 'admin'>('booking');
+  const [currentView, setCurrentView] = useState<'booking' | 'menu' | 'admin'>('booking');
   const [adminActiveTab, setAdminActiveTab] = useState<
     'staff_ops' | 'reservations' | 'tables' | 'kds' | 'inventory' | 'feedback' | 'reports' | 'menu' | 'staff'
   >('reservations');
@@ -465,6 +467,10 @@ export default function App() {
                 onTableChange={setSelectedTableId}
                 onOccasionChange={setSelectedOccasion}
                 onNext={() => goToStep(2)}
+                onPreviewMenu={() => {
+                  setCurrentView('menu');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
               />
             )}
 
@@ -500,6 +506,41 @@ export default function App() {
               />
             )}
           </div>
+        ) : currentView === 'menu' ? (
+          /* Public Guest Menu Preview View (Không bắt buộc đặt bàn) */
+          <PublicMenuPreview
+            onGoToBooking={(initialDish) => {
+              if (initialDish) {
+                handleUpdateQuantity(initialDish, 1);
+              }
+              setCurrentView('booking');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onSelectCourseAndBook={(course, includeWine) => {
+              const allDishes = getStoredMenuItems();
+              course.dishes.forEach((cd) => {
+                const found = allDishes.find((d) => d.id === cd.dishId);
+                if (found) {
+                  handleUpdateQuantity(found, 1);
+                }
+              });
+              if (includeWine && course.winePairingOption) {
+                const wineItem = allDishes.find((d) => d.id === course.winePairingOption?.wineId);
+                if (wineItem) {
+                  handleUpdateQuantity(wineItem, 1);
+                }
+              }
+              setCurrentView('booking');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            selectedDishes={selectedDishes}
+            onUpdateQuantity={handleUpdateQuantity}
+            onClearDishes={handleClearDishes}
+            currentUser={currentUser}
+            onToggleFavorite={handleToggleFavorite}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            onOpenTableService={() => setIsTableServiceOpen(true)}
+          />
         ) : (
           /* Protected Admin Portal View */
           isAdminOrStaff ? (
@@ -561,6 +602,18 @@ export default function App() {
               <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
               <span>Mở cửa: 10:30 - 22:30</span>
             </span>
+            <span className="hidden sm:inline text-stone-600">•</span>
+            <button
+              onClick={() => {
+                setCurrentView('menu');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 hover:text-amber-400 border border-stone-700 transition text-xs whitespace-nowrap cursor-pointer shadow-xs"
+              title="Xem trước thực đơn món ăn & bảng giá"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="font-medium">Thực Đơn</span>
+            </button>
             {isAdminOrStaff && (
               <>
                 <span className="hidden sm:inline text-stone-600">•</span>

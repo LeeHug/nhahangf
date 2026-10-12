@@ -15,7 +15,9 @@ import {
   ChevronRight,
   Link2,
   PartyPopper,
-  Plus
+  Plus,
+  UtensilsCrossed,
+  Eye
 } from 'lucide-react';
 import { RestaurantTable, TableArea } from '../../types';
 import { 
@@ -43,6 +45,7 @@ interface DateTimeTableSelectorProps {
   onToggleMergeTable?: (tableId: string) => void;
   onOccasionChange: (occasion: string) => void;
   onNext: () => void;
+  onPreviewMenu?: () => void;
 }
 
 export const DateTimeTableSelector: React.FC<DateTimeTableSelectorProps> = ({
@@ -62,7 +65,7 @@ export const DateTimeTableSelector: React.FC<DateTimeTableSelectorProps> = ({
   onToggleMergeTable,
   onOccasionChange,
   onNext,
-
+  onPreviewMenu,
 }) => {
   const [customTimeInput, setCustomTimeInput] = useState('');
   const [customTimeError, setCustomTimeError] = useState('');
@@ -140,6 +143,34 @@ export const DateTimeTableSelector: React.FC<DateTimeTableSelectorProps> = ({
 
   return (
     <div className="space-y-8">
+      {/* Banner Xem Trước Thực Đơn Dành Cho Thực Khách */}
+      {onPreviewMenu && (
+        <div className="bg-gradient-to-r from-amber-500/10 via-amber-600/15 to-amber-500/10 border border-amber-300/60 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-stone-950 flex items-center justify-center shrink-0 shadow-sm">
+              <UtensilsCrossed className="w-5 h-5 stroke-[2.2]" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-stone-900 flex items-center gap-1.5">
+                <span>Khám Phá Thực Đơn Thượng Hạng Trước Khi Đặt Bàn</span>
+                <span className="hidden md:inline px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-200 text-amber-900">Xem trước miễn phí</span>
+              </h4>
+              <p className="text-xs text-stone-600 mt-0.5">
+                Tham khảo trọn bộ thực đơn món lẻ, Set Menu Hoàng Gia, hình ảnh chi tiết và bảng giá mà không cần hoàn tất đặt bàn.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onPreviewMenu}
+            className="w-full sm:w-auto shrink-0 px-4 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-850 text-amber-400 hover:text-amber-300 font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer"
+          >
+            <Eye className="w-4 h-4" />
+            <span>Xem Thực Đơn Ngay</span>
+          </button>
+        </div>
+      )}
+
       {/* 1. Chọn ngày & thời gian đến cụ thể */}
       <section className="bg-white rounded-2xl border border-stone-200 p-5 sm:p-7 shadow-xs">
         <div className="flex items-center gap-2 mb-6 border-b border-stone-100 pb-4">
