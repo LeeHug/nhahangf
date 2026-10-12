@@ -19,6 +19,8 @@
     "test:thanhtoan": "tsx tests/payment.test.ts",
     "test:e2e": "tsx tests/e2e.test.ts",
     "test:nhap": "tsx tests/runner.ts --interactive",
+    "server": "tsx server.ts",
+    "client": "vite",
     "db:push": "drizzle-kit push --config=src/db/drizzle.config.ts"
   },
   "dependencies": {
@@ -27,13 +29,10 @@
     "@types/pg": "^8.23.1",
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-react": "^6.1.1",
-    "docx": "^9.7.2",
     "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
     "express": "^4.21.2",
-    "firebase": "^12.19.0",
-    "firebase-admin": "^14.4.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "pg": "^8.23.0",
