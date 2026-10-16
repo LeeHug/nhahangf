@@ -36,6 +36,39 @@ MENU_ITEMS.forEach(item => {
   MENU_PRICE_MAP.set(item.id, item.price);
 });
 
+// --- Validation, Conflict Detection & Finite State Machine Helpers ---
+function timeToMinutes(timeStr: string): number {
+  if (!timeStr || !timeStr.includes(':')) return 0;
+  const [h, m] = timeStr.split(':').map(val => parseInt(val, 10));
+  return (h || 0) * 60 + (m || 0);
+}
+
+// Kiểm tra 2 khung giờ có bị giao thoa (overlap) trong khoảng thời gian phục vụ (mặc định 90 phút)
+function areTimeSlotsOverlapping(time1: string, time2: string, durationMinutes: number = 90): boolean {
+  const m1 = timeToMinutes(time1);
+  const m2 = timeToMinutes(time2);
+  return Math.abs(m1 - m2) < durationMinutes;
+}
+
+// Regex xác thực dữ liệu đầu vào chuẩn tại Server
+const VIETNAMESE_PHONE_REGEX = /^(0|\+84)(3|5|7|8|9)[0-9]{8}$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const DATE_FORMAT_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_FORMAT_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+// Danh sách trạng thái đặt bàn hợp lệ & Ma trận chuyển đổi trạng thái (Finite State Machine)
+const VALID_RESERVATION_STATUSES = ['pending', 'confirmed', 'checked_in', 'completed', 'cancelled'] as const;
+type ValidStatus = typeof VALID_RESERVATION_STATUSES[number];
+
+const ALLOWED_STATUS_TRANSITIONS: Record<ValidStatus, ValidStatus[]> = {
+  pending: ['confirmed', 'cancelled'],
+  confirmed: ['checked_in', 'cancelled'],
+  checked_in: ['completed', 'cancelled'],
+  completed: [], // Trạng thái kết thúc: Khách đã ăn xong và thanh toán hóa đơn
+  cancelled: [], // Trạng thái kết thúc: Đơn đã hủy
+};
+
+
 async function seedDatabaseIfEmpty() {
   if (!process.env.SQL_HOST) {
     console.log('ℹ️ [Database] Chế độ cục bộ: Chưa cấu hình SQL_HOST (sử dụng in-memory fallback cho local dev).');
@@ -299,7 +332,44 @@ async function startServer() {
     }
   });
 
-  // Lỗ hổng 2: Chỉ Admin và Staff mới được chỉnh sửa tình trạng bàn
+  // Vấn đề 1: API tra cứu tình trạng bàn trống theo ngày & khung giờ cụ thể (Dynamic Time-slot Availability)
+  app.get('/api/tables/availability', async (req, res) => {
+    const queryDate = String(req.query.date || new Date().toISOString().split('T')[0]).trim();
+    const queryTime = String(req.query.time || '18:00').trim();
+
+    let allResForDate: any[] = [];
+    try {
+      allResForDate = await db.select().from(reservations).where(eq(reservations.bookingDate, queryDate));
+    } catch {
+      allResForDate = localReservations.filter(r => r.bookingDate === queryDate);
+    }
+
+    // Chỉ lọc các đơn chưa hủy
+    const activeBookings = allResForDate.filter(r => r.status !== 'cancelled');
+
+    const tablesWithSlotStatus = localTables.map(t => {
+      const activeForThisTable = activeBookings.find(r => {
+        const isThisTable = r.tableId === t.id || (r.selectedMergedTableIds && r.selectedMergedTableIds.includes(t.id));
+        if (!isThisTable) return false;
+        return areTimeSlotsOverlapping(r.arrivalTime, queryTime, 90);
+      });
+
+      return {
+        ...t,
+        slotStatus: activeForThisTable ? 'reserved' : 'available',
+        reservedByBookingCode: activeForThisTable ? activeForThisTable.bookingCode : null,
+        reservedTime: activeForThisTable ? activeForThisTable.arrivalTime : null,
+      };
+    });
+
+    res.json({
+      date: queryDate,
+      time: queryTime,
+      tables: tablesWithSlotStatus
+    });
+  });
+
+  // Chỉ Admin và Staff mới được chỉnh sửa tình trạng bàn
   app.put('/api/tables/:id', authenticateToken, requireRoles(['admin', 'staff']), async (req: AuthenticatedRequest, res) => {
     const { id } = req.params;
     const updates = req.body;
@@ -319,7 +389,7 @@ async function startServer() {
   // -------------------------------------------------------------
   // Reservations API
   // -------------------------------------------------------------
-  // Lỗ hổng 2: Chỉ Admin và Staff mới được xem TOÀN BỘ danh sách reservations
+  // Chỉ Admin và Staff mới được xem TOÀN BỘ danh sách reservations
   app.get('/api/reservations', authenticateToken, requireRoles(['admin', 'staff']), async (req: AuthenticatedRequest, res) => {
     try {
       const allRes = await db.select().from(reservations).orderBy(desc(reservations.createdAt));
@@ -329,20 +399,144 @@ async function startServer() {
     }
   });
 
-  // Lỗ hổng 4: Server-authoritative Pricing (Tự tính lại giá món, giảm giá và cọc ở Backend)
+  // POST /api/reservations:
+  // - Khắc phục Vấn đề 2: Server-side Input Validation & Sanitization (tên, SĐT, email, khách tối đa, ngày, giờ, bàn)
+  // - Khắc phục Vấn đề 1: Kiểm tra trùng bàn cùng khung giờ (Overlap Conflict Detection) & Trạng thái bàn thông minh
+  // - Server-authoritative Pricing (tự tính lại giá món, voucher, tiền cọc)
   app.post('/api/reservations', async (req, res) => {
-    const newRes = req.body;
+    const newRes = req.body || {};
 
-    // Validate past time slots for same-day bookings
-    if (newRes.bookingDate && newRes.arrivalTime) {
-      if (isTimeSlotInPast(newRes.arrivalTime, newRes.bookingDate)) {
-        return res.status(400).json({
-          error: 'Khung giờ đặt bàn này đã trôi qua. Vui lòng chọn khung giờ hoặc ngày khác.'
-        });
-      }
+    const customerName = String(newRes.customerName || '').trim();
+    const customerPhone = String(newRes.customerPhone || '').trim().replace(/\s+/g, '');
+    const customerEmail = String(newRes.customerEmail || '').trim().toLowerCase();
+    const rawGuestCount = newRes.guestCount;
+    const guestCount = Number(rawGuestCount);
+    const bookingDate = String(newRes.bookingDate || '').trim();
+    const arrivalTime = String(newRes.arrivalTime || '').trim();
+    const tableId = String(newRes.tableId || '').trim();
+
+    // 1. Kiểm tra Tên khách hàng (bắt buộc, 2-100 ký tự, không chứa HTML/script tag)
+    if (!customerName || customerName.length < 2 || customerName.length > 100) {
+      return res.status(400).json({
+        error: 'Tên khách hàng không hợp lệ (bắt buộc, từ 2 đến 100 ký tự).',
+        code: 'INVALID_CUSTOMER_NAME',
+        field: 'customerName'
+      });
+    }
+    if (/<[^>]*>|[<>]/.test(customerName)) {
+      return res.status(400).json({
+        error: 'Tên khách hàng chứa ký tự không hợp lệ hoặc mã độc HTML/Script.',
+        code: 'MALICIOUS_INPUT',
+        field: 'customerName'
+      });
     }
 
-    // 1. Tự tính tiền món dựa trên menu gốc phía Server
+    // 2. Kiểm tra Số điện thoại (chuẩn regex số điện thoại Việt Nam 10 chữ số)
+    if (!customerPhone || !VIETNAMESE_PHONE_REGEX.test(customerPhone)) {
+      return res.status(400).json({
+        error: 'Số điện thoại không hợp lệ. Vui lòng nhập số điện thoại Việt Nam 10 chữ số hợp lệ (VD: 0912345678 hoặc +84912345678).',
+        code: 'INVALID_PHONE_NUMBER',
+        field: 'customerPhone'
+      });
+    }
+
+    // 3. Kiểm tra Email (chuẩn RFC format)
+    if (!customerEmail || !EMAIL_REGEX.test(customerEmail)) {
+      return res.status(400).json({
+        error: 'Địa chỉ email không đúng định dạng chuẩn (VD: thutrang@gmail.com).',
+        code: 'INVALID_EMAIL_FORMAT',
+        field: 'customerEmail'
+      });
+    }
+
+    // 4. Kiểm tra Số lượng khách (phải là số nguyên từ 1 đến 30 người)
+    if (!Number.isInteger(guestCount) || guestCount < 1 || guestCount > 30) {
+      return res.status(400).json({
+        error: 'Số lượng khách phải là số nguyên từ 1 đến tối đa 30 người. Nếu đi đoàn tiệc lớn hơn, vui lòng liên hệ hotline để được phục vụ chu đáo.',
+        code: 'INVALID_GUEST_COUNT',
+        field: 'guestCount'
+      });
+    }
+
+    // 5. Kiểm tra Ngày đặt bàn (định dạng YYYY-MM-DD và không trong quá khứ)
+    if (!bookingDate || !DATE_FORMAT_REGEX.test(bookingDate)) {
+      return res.status(400).json({
+        error: 'Định dạng ngày đặt bàn không hợp lệ (yêu cầu định dạng chuẩn YYYY-MM-DD).',
+        code: 'INVALID_BOOKING_DATE',
+        field: 'bookingDate'
+      });
+    }
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (bookingDate < todayStr) {
+      return res.status(400).json({
+        error: 'Ngày đặt bàn không hợp lệ (không thể đặt bàn cho ngày trong quá khứ).',
+        code: 'PAST_BOOKING_DATE',
+        field: 'bookingDate'
+      });
+    }
+
+    // 6. Kiểm tra Giờ đến (định dạng HH:mm, khung giờ mở cửa 10:00 - 22:30, và không ở quá khứ nếu là hôm nay)
+    if (!arrivalTime || !TIME_FORMAT_REGEX.test(arrivalTime)) {
+      return res.status(400).json({
+        error: 'Định dạng giờ đến không hợp lệ (yêu cầu định dạng chuẩn HH:mm).',
+        code: 'INVALID_ARRIVAL_TIME',
+        field: 'arrivalTime'
+      });
+    }
+    const arrivalMinutes = timeToMinutes(arrivalTime);
+    if (arrivalMinutes < 600 || arrivalMinutes > 1350) {
+      return res.status(400).json({
+        error: 'Giờ đến nằm ngoài khung giờ phục vụ của nhà hàng (10:00 - 22:30).',
+        code: 'OUT_OF_OPERATING_HOURS',
+        field: 'arrivalTime'
+      });
+    }
+    if (isTimeSlotInPast(arrivalTime, bookingDate)) {
+      return res.status(400).json({
+        error: 'Khung giờ đặt bàn này đã trôi qua. Vui lòng chọn khung giờ hoặc ngày khác.',
+        code: 'PAST_TIME_SLOT',
+        field: 'arrivalTime'
+      });
+    }
+
+    // 7. Kiểm tra Bàn tồn tại trong hệ thống
+    const targetTable = localTables.find(t => t.id === tableId);
+    if (!targetTable) {
+      return res.status(400).json({
+        error: `Bàn với mã "${tableId}" không tồn tại trong sơ đồ nhà hàng.`,
+        code: 'TABLE_NOT_FOUND',
+        field: 'tableId'
+      });
+    }
+
+    // 8. Vấn đề 1: KIỂM TRA TRÙNG BÀN CÙNG KHUNG GIỜ (OVERLAP CONFLICT CHECK)
+    let currentReservationsForDate: any[] = [];
+    try {
+      currentReservationsForDate = await db.select().from(reservations).where(eq(reservations.bookingDate, bookingDate));
+    } catch {
+      currentReservationsForDate = localReservations.filter(r => r.bookingDate === bookingDate);
+    }
+
+    const conflictingReservation = currentReservationsForDate.find(r => {
+      if (r.status === 'cancelled') return false;
+      const isSameTable = r.tableId === tableId || (r.selectedMergedTableIds && r.selectedMergedTableIds.includes(tableId));
+      if (!isSameTable) return false;
+      // Trùng hoặc giao thoa khung giờ trong bán kính 90 phút dùng bữa
+      return areTimeSlotsOverlapping(r.arrivalTime, arrivalTime, 90);
+    });
+
+    if (conflictingReservation) {
+      return res.status(409).json({
+        error: `Bàn ${targetTable.name} đã được khách khác đặt vào lúc ${conflictingReservation.arrivalTime} ngày ${bookingDate} (Mã đơn: #${conflictingReservation.bookingCode}). Vui lòng chọn bàn khác hoặc khung giờ cách ít nhất 90 phút.`,
+        code: 'TABLE_SLOT_CONFLICT',
+        conflictingBookingCode: conflictingReservation.bookingCode,
+        conflictingTime: conflictingReservation.arrivalTime,
+        tableId: targetTable.id,
+        tableName: targetTable.name
+      });
+    }
+
+    // 9. Server-authoritative Pricing: Tự tính tiền món dựa trên menu gốc phía Server
     let verifiedPreOrderTotal = 0;
     const verifiedSelectedDishes = (newRes.selectedDishes || []).map((item: any) => {
       const dishId = item.dish?.id || item.dishId;
@@ -359,7 +553,7 @@ async function startServer() {
       };
     });
 
-    // 2. Tự kiểm tra và tính giảm giá Voucher tại Server
+    // 10. Tự kiểm tra và tính giảm giá Voucher tại Server
     let verifiedDiscount = 0;
     const inputVoucher = newRes.voucherCode ? String(newRes.voucherCode).trim().toUpperCase() : null;
     if (inputVoucher) {
@@ -375,7 +569,6 @@ async function startServer() {
     }
 
     const verifiedFinalTotal = Math.max(0, verifiedPreOrderTotal - verifiedDiscount);
-    // Tính tiền cọc: nếu có yêu cầu đặt cọc
     let verifiedDeposit = 0;
     if (newRes.depositAmount > 0) {
       verifiedDeposit = verifiedFinalTotal > 0 ? Math.round(verifiedFinalTotal * 0.2 / 10000) * 10000 : 200000;
@@ -387,45 +580,51 @@ async function startServer() {
       id: newRes.id || `res_${Date.now()}`,
       bookingCode: newRes.bookingCode || `BK-${Math.floor(1000 + Math.random() * 9000)}`,
       userId: newRes.userId || null,
-      customerName: String(newRes.customerName || '').trim(),
-      customerPhone: String(newRes.customerPhone || '').trim(),
-      customerEmail: String(newRes.customerEmail || '').trim(),
-      guestCount: Math.max(1, Number(newRes.guestCount) || 1),
-      bookingDate: newRes.bookingDate,
-      arrivalTime: newRes.arrivalTime,
-      tableId: newRes.tableId,
-      tableName: newRes.tableName,
-      tableArea: newRes.tableArea,
+      customerName,
+      customerPhone,
+      customerEmail,
+      guestCount,
+      bookingDate,
+      arrivalTime,
+      tableId,
+      tableName: targetTable.name,
+      tableArea: targetTable.area,
       selectedDishes: verifiedSelectedDishes,
       preOrderTotal: verifiedPreOrderTotal,
       depositAmount: verifiedDeposit,
       discountAmount: verifiedDiscount,
       voucherCode: inputVoucher,
       totalAmount: verifiedFinalTotal,
-      status: newRes.status || 'confirmed',
-      occasion: newRes.occasion || null,
-      specialRequests: newRes.specialRequests || null,
+      status: 'confirmed' as const,
+      occasion: newRes.occasion ? String(newRes.occasion).trim() : null,
+      specialRequests: newRes.specialRequests ? String(newRes.specialRequests).trim() : null,
       emailConfirmationSent: newRes.emailConfirmationSent ?? true,
-      emailSentAt: newRes.emailSentAt || null,
+      emailSentAt: newRes.emailSentAt || new Date().toISOString(),
       pointsEarned: calculatedPoints,
       createdAt: toValidDate(newRes.createdAt),
     };
 
+    // Vấn đề 1: Quản lý trạng thái bàn thông minh
+    // Bàn chỉ chuyển trạng thái 'reserved' trên sơ đồ trực tiếp nếu đơn là HÔM NAY và cách giờ đến dưới 180 phút
+    const isToday = bookingDate === todayStr;
+    const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+    const diffToArrival = arrivalMinutes - nowMinutes;
+    const shouldMarkReservedToday = isToday && diffToArrival >= -60 && diffToArrival <= 180;
+
     try {
       const inserted = await db.insert(reservations).values(reservationData).returning();
       
-      // Update table status
-      if (newRes.tableId) {
+      if (shouldMarkReservedToday) {
         await db.update(tables)
           .set({ status: 'reserved', currentReservationId: reservationData.bookingCode })
-          .where(eq(tables.id, newRes.tableId));
+          .where(eq(tables.id, tableId));
       }
 
       res.status(201).json(inserted[0] || reservationData);
     } catch (error) {
       localReservations.unshift(reservationData as any);
-      if (newRes.tableId) {
-        const tIdx = localTables.findIndex(t => t.id === newRes.tableId);
+      if (shouldMarkReservedToday) {
+        const tIdx = localTables.findIndex(t => t.id === tableId);
         if (tIdx !== -1) {
           localTables[tIdx] = { ...localTables[tIdx], status: 'reserved', currentReservationId: reservationData.bookingCode };
         }
@@ -434,21 +633,107 @@ async function startServer() {
     }
   });
 
-  // Lỗ hổng 2: Chỉ Admin và Staff mới được đổi trạng thái đơn đặt bàn
+  // Vấn đề 3: API đổi trạng thái đơn - Kiểm soát chặt chẽ máy trạng thái (Finite State Machine Transitions)
+  // Chỉ Admin và Staff mới được đổi trạng thái
   app.patch('/api/reservations/:id/status', authenticateToken, requireRoles(['admin', 'staff']), async (req: AuthenticatedRequest, res) => {
     const { id } = req.params;
-    const { status } = req.body;
-    try {
-      const updated = await db.update(reservations).set({ status }).where(eq(reservations.id, id)).returning();
-      res.json(updated[0]);
-    } catch (error) {
-      const rIdx = localReservations.findIndex(r => r.id === id || (r as any).bookingCode === id);
-      if (rIdx !== -1) {
-        localReservations[rIdx] = { ...localReservations[rIdx], status: status as any };
-        return res.json(localReservations[rIdx]);
-      }
-      res.json({ id, status });
+    const { status: newStatus } = req.body;
+
+    // 1. Kiểm tra tính hợp lệ của status đầu vào
+    if (!newStatus || !VALID_RESERVATION_STATUSES.includes(newStatus as ValidStatus)) {
+      return res.status(400).json({
+        error: `Trạng thái "${newStatus}" không hợp lệ. Các trạng thái được phép: ${VALID_RESERVATION_STATUSES.join(', ')}.`,
+        code: 'INVALID_STATUS_VALUE'
+      });
     }
+
+    // 2. Tìm đơn đặt bàn hiện tại
+    let currentReservation: any = null;
+    try {
+      const dbFound = await db.select().from(reservations).where(eq(reservations.id, id));
+      currentReservation = dbFound[0];
+    } catch {
+      currentReservation = localReservations.find(r => r.id === id || (r as any).bookingCode === id);
+    }
+    if (!currentReservation) {
+      currentReservation = localReservations.find(r => r.id === id || (r as any).bookingCode === id);
+    }
+
+    if (!currentReservation) {
+      return res.status(404).json({
+        error: `Không tìm thấy đơn đặt bàn với mã hoặc ID: "${id}".`,
+        code: 'RESERVATION_NOT_FOUND'
+      });
+    }
+
+    const currentStatus = (currentReservation.status || 'confirmed') as ValidStatus;
+
+    // 3. Nếu trạng thái không thay đổi, trả về kết quả ngay
+    if (currentStatus === newStatus) {
+      return res.json(currentReservation);
+    }
+
+    // 4. KIỂM TRA MÁY TRẠNG THÁI HỢP LỆ (STATE TRANSITION VALIDATION)
+    const allowedNextStatuses = ALLOWED_STATUS_TRANSITIONS[currentStatus] || [];
+    if (!allowedNextStatuses.includes(newStatus as ValidStatus)) {
+      return res.status(400).json({
+        error: `Không thể chuyển trạng thái từ "${currentStatus}" sang "${newStatus}". Luồng trạng thái hợp lệ: ${
+          currentStatus === 'completed' || currentStatus === 'cancelled'
+            ? 'Đơn đã kết thúc (' + currentStatus + '), không thể thay đổi thêm.'
+            : currentStatus + ' chỉ được chuyển sang: ' + allowedNextStatuses.join(', ')
+        }.`,
+        code: 'INVALID_STATUS_TRANSITION',
+        currentStatus,
+        attemptedStatus: newStatus,
+        allowedStatuses: allowedNextStatuses
+      });
+    }
+
+    // 5. Cập nhật trạng thái đơn trong DB / Memory
+    try {
+      const updated = await db.update(reservations).set({ status: newStatus }).where(eq(reservations.id, currentReservation.id)).returning();
+      currentReservation = updated[0] || { ...currentReservation, status: newStatus };
+    } catch (error) {
+      const rIdx = localReservations.findIndex(r => r.id === currentReservation.id || (r as any).bookingCode === currentReservation.bookingCode);
+      if (rIdx !== -1) {
+        localReservations[rIdx] = { ...localReservations[rIdx], status: newStatus as any };
+        currentReservation = localReservations[rIdx];
+      } else {
+        currentReservation.status = newStatus;
+      }
+    }
+
+    // 6. GIẢI PHÓNG HOẶC ĐIỀU CHỈNH TRẠNG THÁI BÀN (TABLE SIDE EFFECTS)
+    const targetTableId = currentReservation.tableId;
+    if (targetTableId) {
+      if (newStatus === 'completed' || newStatus === 'cancelled') {
+        // Khi hoàn tất hoặc hủy đơn -> Giải phóng bàn về available
+        try {
+          await db.update(tables)
+            .set({ status: 'available', currentReservationId: null })
+            .where(eq(tables.id, targetTableId));
+        } catch {
+          const tIdx = localTables.findIndex(t => t.id === targetTableId);
+          if (tIdx !== -1) {
+            localTables[tIdx] = { ...localTables[tIdx], status: 'available', currentReservationId: undefined };
+          }
+        }
+      } else if (newStatus === 'checked_in') {
+        // Khi khách đã nhận bàn -> Đánh dấu occupied
+        try {
+          await db.update(tables)
+            .set({ status: 'occupied', currentReservationId: currentReservation.bookingCode })
+            .where(eq(tables.id, targetTableId));
+        } catch {
+          const tIdx = localTables.findIndex(t => t.id === targetTableId);
+          if (tIdx !== -1) {
+            localTables[tIdx] = { ...localTables[tIdx], status: 'occupied', currentReservationId: currentReservation.bookingCode };
+          }
+        }
+      }
+    }
+
+    res.json(currentReservation);
   });
 
   // -------------------------------------------------------------

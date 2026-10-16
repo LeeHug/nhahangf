@@ -1,7 +1,20 @@
 import express, { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-export const JWT_SECRET = process.env.JWT_SECRET || 'legourmet-secret-key-super-safe-2026-audit';
+import crypto from 'crypto';
+
+// Lỗ hổng 4 (JWT Secret Hardcode): Loại bỏ triệt để chuỗi khóa cố định trong mã nguồn.
+// Nếu biến môi trường JWT_SECRET chưa được thiết lập, sinh tự động chuỗi ngẫu nhiên 256-bit bằng CSPRNG (crypto.randomBytes).
+function resolveJwtSecret(): string {
+  if (process.env.JWT_SECRET && process.env.JWT_SECRET.trim().length >= 16) {
+    return process.env.JWT_SECRET.trim();
+  }
+  const generatedSecret = crypto.randomBytes(32).toString('hex');
+  console.warn('⚠️ [BẢO MẬT] Biến môi trường JWT_SECRET chưa được cấu hình. Hệ thống đã tự động tạo khóa mật ngẫu nhiên 256-bit bằng CSPRNG (không dùng khóa cố định).');
+  return generatedSecret;
+}
+
+export const JWT_SECRET = resolveJwtSecret();
 
 export interface AuthenticatedUserPayload {
   id: string;
