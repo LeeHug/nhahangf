@@ -35,6 +35,7 @@ import { AuthModal } from './components/Auth/AuthModal';
 import { UserProfileModal } from './components/Auth/UserProfileModal';
 import { TableSelfServiceModal } from './components/TableService/TableSelfServiceModal';
 import { CustomerReviewModal } from './components/Feedback/CustomerReviewModal';
+import { AutomationTestCenter } from './components/AutomationTesting/AutomationTestCenter';
 import { Mail, CheckCircle2, Clock, Phone, MapPin, Sparkles, ShieldCheck, Users, BookOpen } from 'lucide-react';
 import { getDefaultBookingDateTime, getLocalDateString } from './utils/dateTimeUtils';
 
@@ -56,7 +57,7 @@ export default function App() {
   const [userProfileTab, setUserProfileTab] = useState<'history' | 'rewards' | 'favorites' | 'profile'>('history');
 
   // Navigation State
-  const [currentView, setCurrentView] = useState<'booking' | 'menu' | 'admin'>('booking');
+  const [currentView, setCurrentView] = useState<'booking' | 'menu' | 'admin' | 'automation_test'>('booking');
   const [adminActiveTab, setAdminActiveTab] = useState<
     'staff_ops' | 'reservations' | 'tables' | 'kds' | 'inventory' | 'feedback' | 'reports' | 'menu' | 'staff'
   >('reservations');
@@ -540,6 +541,17 @@ export default function App() {
             onToggleFavorite={handleToggleFavorite}
             onOpenAuthModal={() => setIsAuthModalOpen(true)}
             onOpenTableService={() => setIsTableServiceOpen(true)}
+          />
+        ) : currentView === 'automation_test' ? (
+          <AutomationTestCenter
+            onBackToBooking={() => {
+              setCurrentView('booking');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onGoToAdmin={() => {
+              setCurrentView('admin');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
           />
         ) : (
           /* Protected Admin Portal View */
