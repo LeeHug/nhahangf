@@ -22,8 +22,8 @@ import {
 import { UserAccount } from '../types';
 
 interface NavbarProps {
-  currentView: 'booking' | 'menu' | 'admin' | 'automation_test';
-  onViewChange: (view: 'booking' | 'menu' | 'admin' | 'automation_test') => void;
+  currentView: 'booking' | 'menu' | 'admin';
+  onViewChange: (view: 'booking' | 'menu' | 'admin') => void;
   onOpenLookup: () => void;
   onOpenEmailInbox: () => void;
   unreadEmailsCount: number;
@@ -146,21 +146,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                   )}
                 </button>
               )}
-
-              {/* Automation Testing Suite Navigation Button */}
-              <button
-                id="nav-automation-test-btn"
-                onClick={() => onViewChange('automation_test')}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-                  currentView === 'automation_test'
-                    ? 'bg-amber-600 text-stone-950 font-bold shadow-md shadow-amber-900/40'
-                    : 'text-stone-300 hover:text-stone-100 hover:bg-stone-700/50'
-                }`}
-                title="Hệ Thống Kiểm Thử Tự Động Hóa (Automation Testing Suite)"
-              >
-                <Terminal className="w-4 h-4 shrink-0 text-emerald-400" />
-                <span className="hidden sm:inline whitespace-nowrap">Kiểm Thử</span>
-              </button>
             </div>
 
             {/* Phục Vụ Tại Bàn button */}
