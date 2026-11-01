@@ -102,7 +102,7 @@ export interface Reservation {
 }
 
 export type UserRole = 'customer' | 'admin' | 'staff';
-export type MembershipTier = 'Bạc' | 'Vàng' | 'Kim Cương';
+export type MembershipTier = 'Đồng' | 'Bạc' | 'Vàng' | 'Kim Cương';
 
 export interface UserAccount {
   id: string;

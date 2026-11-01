@@ -98,9 +98,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
+    if (!loginPassword || !loginPassword.trim()) {
+      setErrorMessage('Vui lòng nhập mật khẩu đăng nhập!');
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const serverAuth = await apiService.login(loginIdentifier, loginPassword || '123456');
+      const serverAuth = await apiService.login(loginIdentifier, loginPassword);
       if (serverAuth.success && serverAuth.user) {
         setIsLoading(false);
         onSuccessLogin(serverAuth.user, serverAuth.message || 'Đăng nhập thành công!');
@@ -108,7 +113,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         return;
       }
 
-      const res = loginUser(loginIdentifier, loginPassword || '123456');
+      const res = loginUser(loginIdentifier, loginPassword);
       setIsLoading(false);
       if (res.success && res.user) {
         onSuccessLogin(res.user, res.message);
@@ -122,7 +127,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
@@ -132,23 +137,44 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    if (regPassword && regPassword.length < 6) {
-      setErrorMessage('Mật khẩu tối thiểu phải từ 6 ký tự trở lên!');
+    if (!regPassword || regPassword.length < 6) {
+      setErrorMessage('Mật khẩu là bắt buộc và phải có tối thiểu 6 ký tự trở lên!');
       return;
     }
 
-    if (regPassword && regPassword !== regPasswordConfirm) {
+    if (regPassword !== regPasswordConfirm) {
       setErrorMessage('Mật khẩu xác nhận không khớp nhau!');
       return;
     }
 
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      // Gọi API đăng ký tại Server nếu có
+      const serverRes = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: regName.trim(),
+          email: regEmail.trim(),
+          phone: regPhone.trim(),
+          password: regPassword,
+          dietaryPreferences: regDietary || '',
+          membershipTier: 'Đồng',
+        }),
+      });
+
+      if (!serverRes.ok) {
+        const errJson = await serverRes.json().catch(() => ({}));
+        setIsLoading(false);
+        setErrorMessage(errJson.error || 'Đăng ký tài khoản không thành công.');
+        return;
+      }
+
       const res = registerUser({
         name: regName,
         email: regEmail,
         phone: regPhone,
-        password: regPassword || '123456',
+        password: regPassword,
         dietaryPreferences: regDietary,
       });
       setIsLoading(false);
@@ -158,7 +184,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       } else {
         setErrorMessage(res.message);
       }
-    }, 400);
+    } catch (e: any) {
+      setIsLoading(false);
+      setErrorMessage(e?.message || 'Có lỗi khi kết nối máy chủ.');
+    }
   };
 
   const handleForgotSubmit = (e: React.FormEvent) => {

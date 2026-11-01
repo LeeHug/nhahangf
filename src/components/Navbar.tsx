@@ -172,6 +172,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="hidden xl:inline whitespace-nowrap">Tra cứu</span>
             </button>
 
+            {/* Automation Suite Link */}
+            <a
+              id="automation-suite-link"
+              href="/automation"
+              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 border border-purple-800/50 transition-colors flex items-center gap-1.5 text-xs font-semibold shadow-xs"
+              title="Mở Hệ Thống Automation Testing (100 Test Cases Tách Riêng)"
+            >
+              <Terminal className="w-4 h-4 text-purple-400" />
+              <span className="hidden xl:inline whitespace-nowrap">Kiểm Thử (100 TCs)</span>
+            </a>
+
             {/* Email Logs Button - Only visible on wide desktop (>= 1280px) to authenticated Admin/Staff */}
             {isAdminOrStaff && onOpenEmailInbox && (
               <button

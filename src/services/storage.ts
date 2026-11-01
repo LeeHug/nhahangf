@@ -150,8 +150,8 @@ export function loginUser(identifier: string, password?: string): { success: boo
   }
 
   const passMap = getStoredPasswords();
-  const expected = passMap[user.id] || (user as any).passwordHash || '123456';
-  if (password !== expected) {
+  const expected = passMap[user.id] || (user as any).passwordHash;
+  if (!expected || password !== expected) {
     return { success: false, message: 'Mật khẩu không chính xác. Vui lòng kiểm tra lại!' };
   }
 
@@ -170,6 +170,14 @@ export function registerUser(data: {
   const cleanEmail = (data.email || '').trim().toLowerCase();
   const cleanPhone = (data.phone || '').trim().replace(/\s+/g, '');
 
+  if (!data.name || !data.name.trim() || !cleanEmail || !cleanPhone) {
+    return { success: false, message: 'Vui lòng điền đầy đủ Họ tên, Email và Số điện thoại!' };
+  }
+
+  if (!data.password || data.password.length < 6) {
+    return { success: false, message: 'Mật khẩu là bắt buộc và phải có tối thiểu 6 ký tự!' };
+  }
+
   if (users.some(u => (u.email || '').toLowerCase() === cleanEmail)) {
     return { success: false, message: 'Email này đã được đăng ký tài khoản! Vui lòng đăng nhập.' };
   }
@@ -185,7 +193,7 @@ export function registerUser(data: {
     phone: data.phone.trim(),
     role: 'customer',
     loyaltyPoints: 100, // Điểm thưởng chào mừng thành viên mới
-    membershipTier: 'Bạc',
+    membershipTier: 'Đồng',
     dietaryPreferences: data.dietaryPreferences || '',
     favoriteDishIds: [],
     createdAt: new Date().toISOString(),
@@ -196,7 +204,7 @@ export function registerUser(data: {
 
   // Save password
   const passMap = getStoredPasswords();
-  passMap[newUser.id] = data.password || '123456';
+  passMap[newUser.id] = data.password;
   saveStoredPasswords(passMap);
 
   saveCurrentUser(newUser);
