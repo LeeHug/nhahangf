@@ -12,9 +12,7 @@
     "lint": "tsc --noEmit",
     "server": "tsx server.ts",
     "client": "vite",
-    "db:push": "drizzle-kit push --config=src/db/drizzle.config.ts",
-    "test:ui": "vite automation-test-suite --port 5173",
-    "test:ui:build": "vite build automation-test-suite"
+    "db:push": "drizzle-kit push --config=src/db/drizzle.config.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

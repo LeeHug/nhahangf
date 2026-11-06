@@ -1116,14 +1116,6 @@ async function startServer() {
     }
   });
 
-  // -------------------------------------------------------------
-  // Standalone Automation Test Suite UI (/automation)
-  // -------------------------------------------------------------
-  const automationDistPath = path.join(process.cwd(), 'automation-test-suite', 'dist');
-  app.use('/automation', express.static(automationDistPath));
-  app.get('/automation*', (req, res) => {
-    res.sendFile(path.join(automationDistPath, 'index.html'));
-  });
 
   // Vite middleware for development (only when not running from bundled dist)
   const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.argv[1] && process.argv[1].includes('dist'));
