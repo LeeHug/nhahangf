@@ -47,6 +47,9 @@
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"
   },
+  "optionalDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "1.2.16"
+  },
   "overrides": {
     "esbuild": "^0.28.2"
   }
