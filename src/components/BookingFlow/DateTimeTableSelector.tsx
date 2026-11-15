@@ -22,6 +22,8 @@ import {
 import { RestaurantTable, TableArea } from '../../types';
 import { 
   isTimeSlotInPast, 
+  isValidCalendarDate,
+  isWithinOperatingHours,
   getLocalDateString, 
   LUNCH_TIME_SLOTS, 
   DINNER_TIME_SLOTS, 
@@ -128,9 +130,16 @@ export const DateTimeTableSelector: React.FC<DateTimeTableSelectorProps> = ({
   }, 0);
   const totalCombinedCapacity = primaryCap + mergedCap;
 
+  const isDateValid = isValidCalendarDate(selectedDate);
+  const isTimeOperatingValid = isWithinOperatingHours(selectedTime);
+
   const handleCustomTimeSubmit = () => {
     setCustomTimeError('');
     if (!customTimeInput) return;
+    if (!isWithinOperatingHours(customTimeInput)) {
+      setCustomTimeError(`Giờ đến (${customTimeInput}) nằm ngoài khung giờ phục vụ của nhà hàng (10:00 - 22:30). Vui lòng chọn khung giờ hợp lệ!`);
+      return;
+    }
     if (isSlotInPast(customTimeInput, 0)) {
       setCustomTimeError(`Giờ đến (${customTimeInput}) đã qua thời điểm hiện tại của ngày ${selectedDate}. Vui lòng chọn giờ sau thời điểm này!`);
       return;
@@ -139,7 +148,7 @@ export const DateTimeTableSelector: React.FC<DateTimeTableSelectorProps> = ({
     setCustomTimeInput('');
   };
 
-  const isFormValid = selectedDate && !isPastDate && selectedTime && !isSelectedTimeInvalid && guestCount > 0 && selectedTableId;
+  const isFormValid = isDateValid && !isPastDate && selectedTime && isTimeOperatingValid && !isSelectedTimeInvalid && guestCount > 0 && selectedTableId;
 
   return (
     <div className="space-y-8">
@@ -348,6 +357,8 @@ export const DateTimeTableSelector: React.FC<DateTimeTableSelectorProps> = ({
                 <span className="text-xs text-stone-500 whitespace-nowrap">Giờ khác:</span>
                 <input
                   type="time"
+                  min="10:00"
+                  max="22:30"
                   value={customTimeInput}
                   onChange={(e) => {
                     setCustomTimeInput(e.target.value);

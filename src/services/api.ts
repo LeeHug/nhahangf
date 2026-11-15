@@ -129,16 +129,23 @@ export const apiService = {
     try {
       const res = await fetch('/api/reservations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(reservation),
       });
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || 'API error');
+        const err: any = new Error(errorData.error || `Lỗi máy chủ (HTTP ${res.status})`);
+        err.isServerError = true;
+        err.status = res.status;
+        err.code = errorData.code;
+        throw err;
       }
       return await res.json();
-    } catch (e) {
-      console.warn('Failed to sync reservation to SQL', e);
+    } catch (e: any) {
+      if (e?.isServerError) {
+        throw e;
+      }
+      console.warn('Failed to sync reservation to SQL (network/offline fallback)', e);
       return null;
     }
   },
@@ -176,7 +183,7 @@ export const apiService = {
   async cancelReservation(
     idOrCode: string,
     params: { reason: string; cancelNotes?: string; customerPhone?: string }
-  ): Promise<{ success: boolean; reservation?: Reservation; message: string; refundInfo?: any }> {
+  ): Promise<{ success: boolean; reservation?: Reservation; message: string; refundInfo?: any; isServerError?: boolean }> {
     try {
       const res = await fetch(`/api/reservations/${idOrCode}/cancel`, {
         method: 'POST',
@@ -190,6 +197,7 @@ export const apiService = {
       if (!res.ok) {
         return {
           success: false,
+          isServerError: true,
           message: data.error || 'Không thể hủy đơn đặt bàn. Vui lòng kiểm tra lại điều kiện.',
         };
       }
@@ -203,6 +211,7 @@ export const apiService = {
       console.warn('Failed to call cancel reservation API', e);
       return {
         success: false,
+        isServerError: false,
         message: 'Lỗi kết nối máy chủ khi thực hiện hủy đặt bàn.',
       };
     }
@@ -297,6 +306,30 @@ export const apiService = {
     } catch (e) {
       console.warn('Failed to save email log to SQL', e);
       return null;
+    }
+  },
+
+  async deleteEmailLog(id: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/email-logs/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  async clearEmailLogs(): Promise<boolean> {
+    try {
+      const res = await fetch('/api/email-logs', {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      return res.ok;
+    } catch {
+      return false;
     }
   },
 };

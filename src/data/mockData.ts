@@ -509,34 +509,85 @@ export const INITIAL_EMAIL_LOGS: SentEmailLog[] = [
     id: 'em-1',
     toEmail: 'minh.nguyen@example.com',
     toName: 'Nguyễn Văn Minh',
-    subject: '✨ Xác nhận đặt bàn thành công #BK-1001 - Nhà Hàng Hương Sen Bistro',
+    subject: '✨ Xác nhận đặt bàn thành công #BK-1001 - Nhà Hàng Le Gourmet Bistro',
     sentAt: new Date(Date.now() - 3600000 * 4).toISOString(),
     bookingCode: 'BK-1001',
     reservationId: 'res-1',
     type: 'booking_confirmation',
-    htmlContent: 'Xác nhận đặt bàn thành công cho 4 khách tại Bàn M-02 (Trung tâm).'
+    htmlContent: `
+      <div style="font-family: Arial, sans-serif; color: #1c1917; max-width: 560px; margin: 0 auto;">
+        <div style="background: #1c1917; color: #f59e0b; padding: 16px 20px; border-radius: 10px 10px 0 0; text-align: center;">
+          <strong style="font-size: 16px; letter-spacing: 1px;">LE GOURMET BISTRO</strong>
+          <div style="font-size: 11px; color: #d6d3d1; margin-top: 4px;">Xác Nhận Đặt Bàn Thành Công</div>
+        </div>
+        <div style="padding: 18px 20px; border: 1px solid #e7e5e4; border-top: none; border-radius: 0 0 10px 10px; background: #ffffff;">
+          <p style="margin: 0 0 10px;">Kính gửi quý khách <strong>Nguyễn Văn Minh</strong>,</p>
+          <p style="margin: 0 0 12px; font-size: 13px; color: #44403c;">Nhà hàng Le Gourmet Bistro trân trọng xác nhận lịch đặt bàn của quý khách:</p>
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #fafaf9; border: 1px solid #e7e5e4;">
+            <tr><td style="padding: 8px 12px; color: #78716c;">Mã đặt bàn:</td><td style="padding: 8px 12px; font-weight: bold; color: #b45309;">#BK-1001</td></tr>
+            <tr><td style="padding: 8px 12px; color: #78716c;">Bàn & Khu vực:</td><td style="padding: 8px 12px;">Bàn M-02 • Sảnh Chính (4 khách)</td></tr>
+            <tr><td style="padding: 8px 12px; color: #78716c;">Trạng thái:</td><td style="padding: 8px 12px; color: #059669; font-weight: bold;">Đã xác nhận</td></tr>
+          </table>
+          <p style="margin: 14px 0 0; font-size: 12px; color: #78716c;">Địa chỉ: 128 Nguyễn Huệ, Quận 1, TP.HCM • Hotline: 0903.888.999</p>
+        </div>
+      </div>
+    `
   },
   {
     id: 'em-2',
     toEmail: 'thutrang.tran@gmail.com',
     toName: 'Trần Thị Thu Trang',
-    subject: '✨ Xác nhận đặt bàn thành công #BK-1002 - Nhà Hàng Hương Sen Bistro',
+    subject: '✨ Xác nhận đặt bàn thành công #BK-1002 - Nhà Hàng Le Gourmet Bistro',
     sentAt: new Date(Date.now() - 3600000 * 10).toISOString(),
     bookingCode: 'BK-1002',
     reservationId: 'res-2',
     type: 'booking_confirmation',
-    htmlContent: 'Xác nhận đặt bàn kỷ niệm ngày cưới cho 2 khách tại Bàn M-04.'
+    htmlContent: `
+      <div style="font-family: Arial, sans-serif; color: #1c1917; max-width: 560px; margin: 0 auto;">
+        <div style="background: #1c1917; color: #f59e0b; padding: 16px 20px; border-radius: 10px 10px 0 0; text-align: center;">
+          <strong style="font-size: 16px; letter-spacing: 1px;">LE GOURMET BISTRO</strong>
+          <div style="font-size: 11px; color: #d6d3d1; margin-top: 4px;">Xác Nhận Đặt Bàn Kỷ Niệm</div>
+        </div>
+        <div style="padding: 18px 20px; border: 1px solid #e7e5e4; border-top: none; border-radius: 0 0 10px 10px; background: #ffffff;">
+          <p style="margin: 0 0 10px;">Kính gửi quý khách <strong>Trần Thị Thu Trang</strong>,</p>
+          <p style="margin: 0 0 12px; font-size: 13px; color: #44403c;">Chúng tôi rất hân hạnh đón tiếp quý khách trong dịp kỷ niệm ngày cưới:</p>
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #fafaf9; border: 1px solid #e7e5e4;">
+            <tr><td style="padding: 8px 12px; color: #78716c;">Mã đặt bàn:</td><td style="padding: 8px 12px; font-weight: bold; color: #b45309;">#BK-1002</td></tr>
+            <tr><td style="padding: 8px 12px; color: #78716c;">Bàn & Số khách:</td><td style="padding: 8px 12px;">Bàn M-04 • 2 khách</td></tr>
+            <tr><td style="padding: 8px 12px; color: #78716c;">Ghi chú chuẩn bị:</td><td style="padding: 8px 12px;">Trang trí hoa hồng & nến lãng mạn</td></tr>
+          </table>
+          <p style="margin: 14px 0 0; font-size: 12px; color: #78716c;">Địa chỉ: 128 Nguyễn Huệ, Quận 1, TP.HCM • Hotline: 0903.888.999</p>
+        </div>
+      </div>
+    `
   },
   {
     id: 'em-3',
     toEmail: 'leehung.work03@gmail.com',
     toName: 'Lê Hùng',
-    subject: '✨ Xác nhận đặt bàn thành công #BK-1003 - Nhà Hàng Hương Sen Bistro',
+    subject: '✨ Xác nhận đặt bàn thành công #BK-1003 - Nhà Hàng Le Gourmet Bistro',
     sentAt: new Date(Date.now() - 3600000 * 18).toISOString(),
     bookingCode: 'BK-1003',
     reservationId: 'res-3',
     type: 'booking_confirmation',
-    htmlContent: 'Xác nhận đặt phòng VIP Hoàng Gia cho 8 khách, đã tiếp nhận danh sách món chọn trước.'
+    htmlContent: `
+      <div style="font-family: Arial, sans-serif; color: #1c1917; max-width: 560px; margin: 0 auto;">
+        <div style="background: #1c1917; color: #f59e0b; padding: 16px 20px; border-radius: 10px 10px 0 0; text-align: center;">
+          <strong style="font-size: 16px; letter-spacing: 1px;">LE GOURMET BISTRO</strong>
+          <div style="font-size: 11px; color: #d6d3d1; margin-top: 4px;">Xác Nhận Phòng VIP Hoàng Gia</div>
+        </div>
+        <div style="padding: 18px 20px; border: 1px solid #e7e5e4; border-top: none; border-radius: 0 0 10px 10px; background: #ffffff;">
+          <p style="margin: 0 0 10px;">Kính gửi quý khách <strong>Lê Hùng</strong>,</p>
+          <p style="margin: 0 0 12px; font-size: 13px; color: #44403c;">Hệ thống đã xác nhận đặt phòng VIP Hoàng Gia cho đoàn 8 khách cùng thực đơn chọn trước.</p>
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px; background: #fafaf9; border: 1px solid #e7e5e4;">
+            <tr><td style="padding: 8px 12px; color: #78716c;">Mã đặt bàn:</td><td style="padding: 8px 12px; font-weight: bold; color: #b45309;">#BK-1003</td></tr>
+            <tr><td style="padding: 8px 12px; color: #78716c;">Không gian:</td><td style="padding: 8px 12px;">Phòng VIP Hoàng Gia (8 khách)</td></tr>
+            <tr><td style="padding: 8px 12px; color: #78716c;">Thực đơn:</td><td style="padding: 8px 12px;">Đã tiếp nhận danh sách món chọn trước cho bếp</td></tr>
+          </table>
+          <p style="margin: 14px 0 0; font-size: 12px; color: #78716c;">Địa chỉ: 128 Nguyễn Huệ, Quận 1, TP.HCM • Hotline: 0903.888.999</p>
+        </div>
+      </div>
+    `
   }
 ];
 

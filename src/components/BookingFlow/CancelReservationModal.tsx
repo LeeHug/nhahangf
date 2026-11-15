@@ -91,8 +91,10 @@ export const CancelReservationModal: React.FC<CancelReservationModalProps> = ({
           onCancelledSuccess(apiResult.reservation);
         }
         window.dispatchEvent(new Event('storage'));
+      } else if (apiResult.isServerError) {
+        setErrorMessage(apiResult.message || 'Không thể hủy đơn đặt bàn.');
       } else {
-        // Local fallback if API returned non-success or server is in local mode
+        // Local fallback only when API server is unreachable
         const localResult = cancelStoredReservation(reservation.id, fullReason, customNotes.trim());
         if (localResult.success && localResult.reservation) {
           setSuccessData({

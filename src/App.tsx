@@ -17,7 +17,8 @@ import {
   clearAllEmailLogs,
   addDishesToReservation,
   checkoutAndSettleReservation,
-  getStoredMenuItems
+  getStoredMenuItems,
+  generateBookingEmailHtml
 } from './services/storage';
 import { apiService } from './services/api';
 import { Reservation, RestaurantTable, SentEmailLog, SelectedDishItem, TableArea, ReservationStatus, TableStatus, MenuItem, UserAccount } from './types';
@@ -72,6 +73,7 @@ export default function App() {
   const [guestCount, setGuestCount] = useState<number>(4);
   const [selectedArea, setSelectedArea] = useState<TableArea>('main');
   const [selectedTableId, setSelectedTableId] = useState<string>('T-01');
+  const [selectedMergedTableIds, setSelectedMergedTableIds] = useState<string[]>([]);
   const [selectedOccasion, setSelectedOccasion] = useState<string>('Bữa Ăn Gia Đình');
   const [selectedDishes, setSelectedDishes] = useState<SelectedDishItem[]>([]);
 
@@ -83,6 +85,54 @@ export default function App() {
   // Real-time Toast notification
   const [toastMessage, setToastMessage] = useState<{ title: string; desc: string; type?: string } | null>(null);
 
+  const mergeAndSaveEmailLogs = (serverLogs: SentEmailLog[], localLogs: SentEmailLog[]): SentEmailLog[] => {
+    const map = new Map<string, SentEmailLog>();
+    const keyFor = (log: SentEmailLog) => {
+      const code = (log.bookingCode || '').trim();
+      const type = (log.type || 'booking_confirmation').trim();
+      return code ? `${code}::${type}` : log.id;
+    };
+
+    // Prefer richer HTML content when merging logs for the same bookingCode + type
+    [...localLogs, ...serverLogs].forEach((log) => {
+      if (!log) return;
+      const k = keyFor(log);
+      const existing = map.get(k);
+      if (!existing) {
+        map.set(k, log);
+      } else {
+        const existingHasHtml = /<[a-z][\s\S]*>/i.test(existing.htmlContent || '');
+        const incomingHasHtml = /<[a-z][\s\S]*>/i.test(log.htmlContent || '');
+        const existingTime = new Date(existing.sentAt || 0).getTime();
+        const incomingTime = new Date(log.sentAt || 0).getTime();
+        if ((incomingHasHtml && !existingHasHtml) || (incomingHasHtml === existingHasHtml && incomingTime >= existingTime)) {
+          map.set(k, { ...existing, ...log, reservationId: log.reservationId || existing.reservationId });
+        }
+      }
+    });
+
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(b.sentAt || 0).getTime() - new Date(a.sentAt || 0).getTime()
+    );
+    saveStoredEmailLogs(merged);
+    return merged;
+  };
+
+  const refreshEmailLogs = async () => {
+    const localEmails = getStoredEmailLogs();
+    try {
+      const cloudEmails = await apiService.getEmailLogs();
+      if (cloudEmails && cloudEmails.length > 0) {
+        const merged = mergeAndSaveEmailLogs(cloudEmails, localEmails);
+        setEmailLogs(merged);
+        return;
+      }
+    } catch {}
+    setEmailLogs(
+      [...localEmails].sort((a, b) => new Date(b.sentAt || 0).getTime() - new Date(a.sentAt || 0).getTime())
+    );
+  };
+
   // Load Initial Data from Cloud SQL / LocalStorage fallback
   useEffect(() => {
     const loadedReservations = getStoredReservations();
@@ -92,6 +142,9 @@ export default function App() {
 
     setReservations(loadedReservations);
     setTables(loadedTables);
+    setEmailLogs(
+      [...loadedEmails].sort((a, b) => new Date(b.sentAt || 0).getTime() - new Date(a.sentAt || 0).getTime())
+    );
     if (loadedUser) {
       setCurrentUser(loadedUser);
     }
@@ -122,8 +175,8 @@ export default function App() {
           saveStoredReservations(cloudReservations);
         }
         if (cloudEmails && cloudEmails.length > 0) {
-          setEmailLogs(cloudEmails);
-          saveStoredEmailLogs(cloudEmails);
+          const merged = mergeAndSaveEmailLogs(cloudEmails, loadedEmails);
+          setEmailLogs(merged);
         }
       } catch (err) {
         console.warn('Cloud SQL async fetch error (using local storage fallback):', err);
@@ -169,9 +222,18 @@ export default function App() {
           apiService.getEmailLogs(),
           apiService.getTables(),
         ]);
-        if (resList && resList.length > 0) setReservations(resList);
-        if (emailList && emailList.length > 0) setEmailLogs(emailList);
-        if (tableList && tableList.length > 0) setTables(tableList);
+        if (resList && resList.length > 0) {
+          setReservations(resList);
+          saveStoredReservations(resList);
+        }
+        if (emailList && emailList.length > 0) {
+          const merged = mergeAndSaveEmailLogs(emailList, getStoredEmailLogs());
+          setEmailLogs(merged);
+        }
+        if (tableList && tableList.length > 0) {
+          setTables(tableList);
+          saveStoredTables(tableList);
+        }
       } catch (err) {
         console.warn('Sync live data from SQL on login notice:', err);
       }
@@ -268,6 +330,13 @@ export default function App() {
       preOrderTotal - (customerData.discountAmount || 0) - (customerData.pointsDiscount || 0)
     );
 
+    const mergedTableObjs = tables.filter((t) => selectedMergedTableIds.includes(t.id));
+    const allSelectedTableIds = Array.from(new Set([selectedTableId, ...selectedMergedTableIds]));
+    const combinedTableName = [
+      selectedTable?.name || 'Bàn Tiêu Chuẩn',
+      ...mergedTableObjs.map((t) => t.name),
+    ].join(' + ');
+
     // 1. Ưu tiên lưu trực tiếp vào cơ sở dữ liệu PostgreSQL thông qua Backend API
     let savedReservation: Reservation | null = null;
     try {
@@ -279,7 +348,9 @@ export default function App() {
         bookingDate: selectedDate,
         arrivalTime: selectedTime,
         tableId: selectedTableId,
-        tableName: selectedTable?.name || 'Bàn Tiêu Chuẩn',
+        tableIds: allSelectedTableIds,
+        selectedMergedTableIds,
+        tableName: combinedTableName,
         tableArea: selectedArea,
         selectedDishes,
         preOrderTotal,
@@ -297,8 +368,11 @@ export default function App() {
       if (serverCreated) {
         savedReservation = serverCreated;
       }
-    } catch (err) {
-      console.warn('Backend PostgreSQL creation error, fallback to local storage:', err);
+    } catch (err: any) {
+      if (err?.isServerError) {
+        throw err;
+      }
+      console.warn('Backend PostgreSQL unreachable, fallback to local storage:', err);
     }
 
     if (savedReservation) {
@@ -308,6 +382,22 @@ export default function App() {
       saveStoredReservations(updatedList);
       setReservations(updatedList);
       setTables(getStoredTables());
+
+      // Tạo và lưu nhật ký email xác nhận giàu HTML để Staff/Admin xem được ngay
+      const newEmailLog: SentEmailLog = {
+        id: `em-${Date.now()}`,
+        toEmail: savedReservation.customerEmail || customerData.email,
+        toName: savedReservation.customerName || customerData.name,
+        subject: `✨ Xác nhận đặt bàn #${savedReservation.bookingCode} - Nhà Hàng Le Gourmet Bistro`,
+        sentAt: savedReservation.emailSentAt || new Date().toISOString(),
+        bookingCode: savedReservation.bookingCode,
+        reservationId: savedReservation.id,
+        type: 'booking_confirmation',
+        htmlContent: generateBookingEmailHtml(savedReservation),
+      };
+      const mergedEmails = mergeAndSaveEmailLogs([newEmailLog], getStoredEmailLogs());
+      setEmailLogs(mergedEmails);
+      apiService.createEmailLog(newEmailLog).catch(console.error);
 
       const activeSessionUser = getCurrentUser() || currentUser;
       if (activeSessionUser) {
@@ -321,13 +411,15 @@ export default function App() {
 
       triggerToast(
         `✨ Đã Gửi Yêu Cầu Đặt Bàn #${savedReservation.bookingCode}`,
-        `Hệ thống đã lưu vào cơ sở dữ liệu PostgreSQL và chuyển giao thông báo đến ${customerData.email}.`
+        customerData.email
+          ? `Hệ thống đã lưu vào cơ sở dữ liệu PostgreSQL và chuyển giao thông báo đến ${customerData.email}.`
+          : `Hệ thống đã lưu đơn đặt bàn vào cơ sở dữ liệu PostgreSQL thành công.`
       );
 
       return savedReservation;
     }
 
-    // 2. Chế độ fallback nếu máy chủ chưa bật PostgreSQL
+    // 2. Chế độ fallback chỉ chạy khi không kết nối được máy chủ (offline mode)
     const { reservation, emailLog } = addNewReservation({
       customerName: customerData.name,
       customerPhone: customerData.phone,
@@ -336,7 +428,8 @@ export default function App() {
       bookingDate: selectedDate,
       arrivalTime: selectedTime,
       tableId: selectedTableId,
-      tableName: selectedTable?.name || 'Bàn Tiêu Chuẩn',
+      tableIds: allSelectedTableIds,
+      tableName: combinedTableName,
       tableArea: selectedArea,
       selectedDishes,
       preOrderTotal,
@@ -490,10 +583,18 @@ export default function App() {
     }
   };
 
+  const handleToggleMergeTable = (tableId: string) => {
+    if (tableId === selectedTableId) return;
+    setSelectedMergedTableIds((prev) =>
+      prev.includes(tableId) ? prev.filter((id) => id !== tableId) : [...prev, tableId]
+    );
+  };
+
   const handleResetBooking = () => {
     setCurrentStep(1);
     setMaxAccessibleStep(1);
     setSelectedDishes([]);
+    setSelectedMergedTableIds([]);
   };
 
   const todayBookingsCount = reservations.filter(
@@ -515,6 +616,7 @@ export default function App() {
         onOpenLookup={() => setIsLookupOpen(true)}
         onOpenEmailInbox={() => {
           if (isAdminOrStaff) {
+            refreshEmailLogs();
             setIsEmailInboxOpen(true);
           }
         }}
@@ -586,12 +688,20 @@ export default function App() {
                 guestCount={guestCount}
                 selectedArea={selectedArea}
                 selectedTableId={selectedTableId}
+                selectedMergedTableIds={selectedMergedTableIds}
                 selectedOccasion={selectedOccasion}
                 onDateChange={setSelectedDate}
                 onTimeChange={setSelectedTime}
                 onGuestCountChange={setGuestCount}
-                onAreaChange={setSelectedArea}
-                onTableChange={setSelectedTableId}
+                onAreaChange={(area) => {
+                  setSelectedArea(area);
+                  setSelectedMergedTableIds([]);
+                }}
+                onTableChange={(tid) => {
+                  setSelectedTableId(tid);
+                  setSelectedMergedTableIds((prev) => prev.filter((id) => id !== tid));
+                }}
+                onToggleMergeTable={handleToggleMergeTable}
                 onOccasionChange={setSelectedOccasion}
                 onNext={() => goToStep(2)}
                 onPreviewMenu={() => {
@@ -622,6 +732,7 @@ export default function App() {
                 selectedTime={selectedTime}
                 guestCount={guestCount}
                 table={selectedTable}
+                mergedTables={tables.filter((t) => selectedMergedTableIds.includes(t.id))}
                 selectedDishes={selectedDishes}
                 selectedOccasion={selectedOccasion}
                 currentUser={currentUser}
@@ -682,6 +793,10 @@ export default function App() {
               onStatusChange={handleStatusChange}
               onUpdateTableStatus={handleUpdateTableStatus}
               onOpenEmailPreview={(res) => setEmailPreviewReservation(res)}
+              onOpenEmailInbox={() => {
+                refreshEmailLogs();
+                setIsEmailInboxOpen(true);
+              }}
               onCreateManualReservation={handleManualBooking}
               onSaveDishesAtTable={handleSaveDishesAtTable}
               onConfirmCheckout={handleConfirmCheckout}
@@ -696,11 +811,11 @@ export default function App() {
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
               onSuccessAdminLogin={(adminUser, targetTab) => {
-                setCurrentUser(adminUser);
+                handleLoginSuccess(adminUser);
                 if (targetTab) {
                   setAdminActiveTab(targetTab);
                 }
-                triggerToast('Xác Thực Thành Công', `Xin chào Quản lý ${adminUser.name}. Quyền truy cập quản trị đã được kích hoạt.`);
+                triggerToast('Xác Thực Thành Công', `Xin chào ${adminUser.name}. Quyền truy cập vận hành đã được kích hoạt.`);
               }}
               onLogoutAndSwitch={() => {
                 handleLogout();
@@ -816,19 +931,29 @@ export default function App() {
       {isEmailInboxOpen && (
         <EmailInboxModal
           emailLogs={emailLogs}
+          reservations={reservations}
           onClose={() => setIsEmailInboxOpen(false)}
           onViewEmailDetail={(log) => {
-            const res = reservations.find((r) => r.id === log.reservationId);
-            if (res) setEmailPreviewReservation(res);
+            const res = reservations.find(
+              (r) =>
+                (log.reservationId && r.id === log.reservationId) ||
+                (log.bookingCode && r.bookingCode === log.bookingCode)
+            );
+            if (res) {
+              setIsEmailInboxOpen(false);
+              setEmailPreviewReservation(res);
+            }
           }}
           onDeleteLog={(logId) => {
             const updated = deleteEmailLog(logId);
             setEmailLogs(updated);
+            apiService.deleteEmailLog(logId).catch(console.error);
             triggerToast('Đã Xóa Nhật Ký', 'Bản ghi email đã được xóa thành công.');
           }}
           onClearAllLogs={() => {
             const updated = clearAllEmailLogs();
             setEmailLogs(updated);
+            apiService.clearEmailLogs().catch(console.error);
             triggerToast('Đã Xóa Tất Cả', 'Toàn bộ nhật ký email gửi tự động đã được làm sạch.');
           }}
         />

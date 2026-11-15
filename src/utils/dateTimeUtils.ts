@@ -5,9 +5,56 @@
 
 export const VIETNAM_TIMEZONE = 'Asia/Ho_Chi_Minh';
 
+export const OPERATING_HOURS_START_MINUTES = 10 * 60; // 10:00
+export const OPERATING_HOURS_END_MINUTES = 22 * 60 + 30; // 22:30
+
 export const LUNCH_TIME_SLOTS = ['11:00', '11:30', '12:00', '12:30', '13:00', '13:30'];
 export const DINNER_TIME_SLOTS = ['17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00'];
 export const ALL_BOOKING_SLOTS = [...LUNCH_TIME_SLOTS, ...DINNER_TIME_SLOTS];
+
+/**
+ * Validates that a YYYY-MM-DD string represents an actual calendar date (e.g. rejects 2027-02-30).
+ */
+export function isValidCalendarDate(dateStr: string): boolean {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dateObj = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dateObj.getUTCFullYear() === y &&
+    dateObj.getUTCMonth() === m - 1 &&
+    dateObj.getUTCDate() === d
+  );
+}
+
+/**
+ * Validates that an HH:mm time string is within restaurant operating hours (10:00 - 22:30).
+ */
+export function isWithinOperatingHours(timeStr: string): boolean {
+  if (!timeStr || !/^([01]\d|2[0-3]):([0-5]\d)$/.test(timeStr)) return false;
+  const [h, m] = timeStr.split(':').map(Number);
+  const mins = h * 60 + m;
+  return mins >= OPERATING_HOURS_START_MINUTES && mins <= OPERATING_HOURS_END_MINUTES;
+}
+
+/**
+ * Checks whether a voucher expiryDate (DD/MM/YYYY or YYYY-MM-DD) has passed in Vietnam timezone.
+ */
+export function isVoucherExpired(expiryDate?: string): boolean {
+  if (!expiryDate) return false;
+  const clean = expiryDate.trim();
+  let isoExpiry = '';
+  const ddmmyyyy = clean.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (ddmmyyyy) {
+    isoExpiry = `${ddmmyyyy[3]}-${ddmmyyyy[2]}-${ddmmyyyy[1]}`;
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    isoExpiry = clean;
+  } else {
+    return false;
+  }
+  const todayVnStr = getLocalDateString(new Date());
+  return todayVnStr > isoExpiry;
+}
 
 /**
  * Gets the current date and time components in Vietnam timezone (Asia/Ho_Chi_Minh).

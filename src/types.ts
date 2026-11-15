@@ -159,7 +159,7 @@ export interface SentEmailLog {
   sentAt: string;
   bookingCode: string;
   reservationId: string;
-  type: 'booking_confirmation' | 'status_update' | 'reminder';
+  type: 'booking_confirmation' | 'status_update' | 'cancellation' | 'reminder';
   htmlContent: string;
 }
 

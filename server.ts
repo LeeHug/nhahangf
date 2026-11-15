@@ -3,13 +3,14 @@ import express from 'express';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
 import { db } from './src/db/index.ts';
 import { tables, reservations, users, emailLogs } from './src/db/schema.ts';
 import { eq, desc, sql } from 'drizzle-orm';
 import { EXPANDED_TABLES } from './src/data/expandedTables.ts';
 import { INITIAL_RESERVATIONS, INITIAL_USERS, INITIAL_EMAIL_LOGS, MENU_ITEMS, INITIAL_VOUCHERS, INITIAL_POINTS_TRANSACTIONS } from './src/data/mockData.ts';
-import { isTimeSlotInPast, checkCancellationEligibility } from './src/utils/dateTimeUtils.ts';
-import { generateToken, authenticateToken, requireRoles, AuthenticatedRequest } from './server-auth.ts';
+import { isTimeSlotInPast, checkCancellationEligibility, isValidCalendarDate, isWithinOperatingHours, isVoucherExpired } from './src/utils/dateTimeUtils.ts';
+import { generateToken, authenticateToken, requireRoles, AuthenticatedRequest, AuthenticatedUserPayload, JWT_SECRET } from './server-auth.ts';
 import { PointsTransaction } from './src/types.ts';
 
 let localTables = [...EXPANDED_TABLES];
@@ -117,8 +118,12 @@ async function seedDatabaseIfEmpty() {
   }
   try {
     console.log(`✅ [PostgreSQL] Đang kết nối tới cơ sở dữ liệu: ${process.env.DATABASE_URL ? 'DATABASE_URL' : `${process.env.SQL_USER}@${process.env.SQL_HOST}:${process.env.SQL_PORT || 5432}/${process.env.SQL_DB_NAME}`}`);
-    await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS points_redeemed integer DEFAULT 0`);
-    await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS points_discount integer DEFAULT 0`);
+    try {
+      await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS points_redeemed integer DEFAULT 0`);
+      await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS points_discount integer DEFAULT 0`);
+    } catch {
+      // Schema already managed by drizzle-kit / Cloud SQL migration
+    }
     const existingTables = await db.select().from(tables);
     if (existingTables.length === 0) {
       console.log('🌱 [PostgreSQL] Đang khởi tạo dữ liệu danh mục bàn (tables)...');
@@ -236,7 +241,8 @@ async function startServer() {
 
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 phút (SRS FR-SYS-04)
-    max: process.env.NODE_ENV === 'test' ? 1000 : 5, // SRS: 5 lần/15 phút cho môi trường thật
+    max: process.env.NODE_ENV === 'test' ? 1000 : 5, // SRS: 5 lần đăng nhập thất bại / 15 phút
+    skipSuccessfulRequests: true,
     skip: isLocalRequest,
     standardHeaders: true,
     legacyHeaders: false,
@@ -307,7 +313,7 @@ async function startServer() {
     );
 
     if (!user) {
-      return res.status(401).json({ error: 'Tài khoản (Email hoặc Số điện thoại) không tồn tại!' });
+      return res.status(401).json({ error: 'Tài khoản hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại!' });
     }
 
     if (user.status === 'inactive') {
@@ -325,7 +331,7 @@ async function startServer() {
     }
 
     if (!isMatch) {
-      return res.status(401).json({ error: 'Mật khẩu không chính xác. Vui lòng kiểm tra lại!' });
+      return res.status(401).json({ error: 'Tài khoản hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại!' });
     }
 
     // Ký JWT Token với Secret bí mật của Server
@@ -433,7 +439,10 @@ async function startServer() {
 
     const tablesWithSlotStatus = localTables.map(t => {
       const activeForThisTable = activeBookings.find(r => {
-        const isThisTable = r.tableId === t.id || (r.selectedMergedTableIds && r.selectedMergedTableIds.includes(t.id));
+        const resTableIds: string[] = Array.isArray(r.tableIds) && r.tableIds.length > 0
+          ? r.tableIds
+          : (Array.isArray(r.selectedMergedTableIds) ? [r.tableId, ...r.selectedMergedTableIds] : [r.tableId]);
+        const isThisTable = resTableIds.includes(t.id);
         if (!isThisTable) return false;
         return areTimeSlotsOverlapping(r.arrivalTime, queryTime, 120);
       });
@@ -454,12 +463,20 @@ async function startServer() {
   });
 
   // Tách biệt quyền hạn theo SRS App.A:
-  // - Staff chỉ được cập nhật trạng thái vận hành bàn: status, currentReservationId
+  // - Staff chỉ được cập nhật trạng thái vận hành bàn hợp lệ: status ('available' | 'occupied' | 'reserved' | 'cleaning'), currentReservationId
   // - Chỉ Admin mới có quyền sửa đổi cấu hình vật lý: capacity, name, area, shape
+  const VALID_TABLE_STATUSES = ['available', 'occupied', 'reserved', 'cleaning'] as const;
   app.put('/api/tables/:id', authenticateToken, requireRoles(['admin', 'staff']), async (req: AuthenticatedRequest, res) => {
     const { id } = req.params;
-    const body = req.body;
+    const body = req.body || {};
     const isStaffOnly = req.user?.role === 'staff';
+
+    if (body.status !== undefined && !VALID_TABLE_STATUSES.includes(body.status)) {
+      return res.status(400).json({
+        error: `Trạng thái bàn "${body.status}" không hợp lệ. Chỉ chấp nhận: ${VALID_TABLE_STATUSES.join(', ')}.`,
+        code: 'INVALID_TABLE_STATUS'
+      });
+    }
 
     let updates: any = {};
     if (isStaffOnly) {
@@ -559,10 +576,10 @@ async function startServer() {
       });
     }
 
-    // 5. Kiểm tra Ngày đặt bàn (định dạng YYYY-MM-DD và không trong quá khứ theo giờ Việt Nam GMT+7)
-    if (!bookingDate || !DATE_FORMAT_REGEX.test(bookingDate)) {
+    // 5. Kiểm tra Ngày đặt bàn (định dạng YYYY-MM-DD, tồn tại trên lịch dương và không trong quá khứ theo giờ Việt Nam GMT+7)
+    if (!bookingDate || !DATE_FORMAT_REGEX.test(bookingDate) || !isValidCalendarDate(bookingDate)) {
       return res.status(400).json({
-        error: 'Định dạng ngày đặt bàn không hợp lệ (yêu cầu định dạng chuẩn YYYY-MM-DD).',
+        error: 'Ngày đặt bàn không hợp lệ hoặc không tồn tại trên lịch dương (yêu cầu định dạng chuẩn YYYY-MM-DD).',
         code: 'INVALID_BOOKING_DATE',
         field: 'bookingDate'
       });
@@ -585,7 +602,7 @@ async function startServer() {
       });
     }
     const arrivalMinutes = timeToMinutes(arrivalTime);
-    if (arrivalMinutes < 600 || arrivalMinutes > 1350) {
+    if (!isWithinOperatingHours(arrivalTime)) {
       return res.status(400).json({
         error: 'Giờ đến nằm ngoài khung giờ phục vụ của nhà hàng (10:00 - 22:30).',
         code: 'OUT_OF_OPERATING_HOURS',
@@ -600,13 +617,15 @@ async function startServer() {
       });
     }
 
-    // 7. Kiểm tra Bàn tồn tại trong hệ thống (SRS App.B: trả mã 404 khi không tìm thấy)
-    const targetTable = localTables.find(t => 
-      t.id === tableId || 
-      t.id === `T-${String(rawTableId).padStart(2, '0')}` || 
-      String(t.id) === String(rawTableId) ||
-      t.name === `Bàn ${rawTableId}`
+    // 7. Kiểm tra Bàn chính & danh sách Bàn ghép tồn tại trong hệ thống (SRS App.B: trả mã 404 khi không tìm thấy)
+    const findTableByIdOrName = (tid: any) => localTables.find(t =>
+      t.id === tid ||
+      t.id === `T-${String(tid).padStart(2, '0')}` ||
+      String(t.id) === String(tid) ||
+      t.name === `Bàn ${tid}`
     );
+
+    const targetTable = findTableByIdOrName(tableId || rawTableId);
     if (!targetTable) {
       return res.status(404).json({
         error: `Bàn với mã "${tableId || rawTableId}" không tồn tại trong sơ đồ nhà hàng.`,
@@ -615,14 +634,35 @@ async function startServer() {
       });
     }
 
-    // 7b. Kiểm tra Sức chứa bàn (SRS TC-41: guestCount <= sức chứa bàn + bàn ghép)
-    let totalCapacity = targetTable.capacity;
-    if (Array.isArray(newRes.selectedMergedTableIds)) {
-      for (const mId of newRes.selectedMergedTableIds) {
-        const mTable = localTables.find(t => t.id === mId || String(t.id) === String(mId));
-        if (mTable) totalCapacity += mTable.capacity;
+    // Chuẩn hóa danh sách bàn ghép từ selectedMergedTableIds hoặc tableIds
+    const rawMergedInput: any[] = [
+      ...(Array.isArray(newRes.selectedMergedTableIds) ? newRes.selectedMergedTableIds : []),
+      ...(Array.isArray(newRes.tableIds) ? newRes.tableIds : []),
+    ];
+    const validMergedTables: typeof localTables = [];
+    const seenTableIds = new Set<string>([targetTable.id]);
+
+    for (const rawMid of rawMergedInput) {
+      if (!rawMid) continue;
+      const resolved = findTableByIdOrName(String(rawMid).trim());
+      if (!resolved) {
+        return res.status(404).json({
+          error: `Bàn ghép với mã "${rawMid}" không tồn tại trong sơ đồ nhà hàng.`,
+          code: 'TABLE_NOT_FOUND',
+          field: 'selectedMergedTableIds'
+        });
+      }
+      if (!seenTableIds.has(resolved.id)) {
+        seenTableIds.add(resolved.id);
+        validMergedTables.push(resolved);
       }
     }
+
+    const allRequestedTableIds = [targetTable.id, ...validMergedTables.map(t => t.id)];
+    const allRequestedTableNames = [targetTable.name, ...validMergedTables.map(t => t.name)].join(' + ');
+
+    // 7b. Kiểm tra Sức chứa bàn (SRS TC-41: guestCount <= sức chứa bàn + bàn ghép)
+    const totalCapacity = targetTable.capacity + validMergedTables.reduce((s, t) => s + t.capacity, 0);
     if (guestCount > totalCapacity) {
       return res.status(400).json({
         error: `Số lượng khách (${guestCount} người) vượt quá sức chứa tối đa của bàn (${totalCapacity} chỗ).`,
@@ -646,12 +686,145 @@ async function startServer() {
       }
     }
 
-    // Mutex bảo vệ chống Race condition đồng thời vào cùng 1 bàn
-    const lockKey = `${bookingDate}_${targetTable.id}`;
-    const releaseLock = await acquireSlotLock(lockKey);
+    // 7d. Xác thực Token tùy chọn cho người dùng đăng nhập (chống giả mạo userId & tiêu điểm hộ người khác)
+    const authHeader = req.headers['authorization'];
+    const rawToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    let authenticatedUser: AuthenticatedUserPayload | null = null;
+    if (rawToken) {
+      try {
+        authenticatedUser = jwt.verify(rawToken, JWT_SECRET) as AuthenticatedUserPayload;
+      } catch {
+        return res.status(403).json({
+          error: 'Forbidden: Phiên đăng nhập không hợp lệ hoặc đã hết hạn.',
+          code: 'TOKEN_INVALID'
+        });
+      }
+    }
+
+    const requestedPoints = Number(newRes.pointsRedeemed) || 0;
+    if (requestedPoints < 0 || !Number.isInteger(requestedPoints)) {
+      return res.status(400).json({
+        error: 'Số điểm quy đổi phải là số nguyên không âm.',
+        code: 'INVALID_POINTS_REDEEMED',
+        field: 'pointsRedeemed'
+      });
+    }
+    if (requestedPoints > 0) {
+      if (!authenticatedUser) {
+        return res.status(401).json({
+          error: 'Unauthorized: Vui lòng đăng nhập để sử dụng điểm thành viên.',
+          code: 'AUTH_REQUIRED'
+        });
+      }
+      if (newRes.userId && newRes.userId !== authenticatedUser.id && !['admin', 'staff'].includes(authenticatedUser.role)) {
+        return res.status(403).json({
+          error: 'Forbidden: Không thể sử dụng điểm thưởng của tài khoản khác.',
+          code: 'ACCESS_DENIED'
+        });
+      }
+    }
+
+    const resolvedUserId: string | null = authenticatedUser
+      ? (['admin', 'staff'].includes(authenticatedUser.role) && newRes.userId ? String(newRes.userId) : authenticatedUser.id)
+      : null;
+
+    // 9. Server-authoritative Pricing: Chỉ chấp nhận món tồn tại trong thực đơn gốc phía Server
+    let verifiedPreOrderTotal = 0;
+    const verifiedSelectedDishes: any[] = [];
+    for (const item of (Array.isArray(rawDishes) ? rawDishes : [])) {
+      const dishId = item.dish?.id || item.dishId || (item.menuItemId ? `m-${String(item.menuItemId).padStart(2, '0')}` : null);
+      const menuDish = dishId ? MENU_ITEMS.find(m => m.id === dishId) : undefined;
+      if (!menuDish || menuDish.isAvailable === false) {
+        return res.status(400).json({
+          error: `Món ăn "${dishId || item.dish?.name || 'không xác định'}" không tồn tại trong thực đơn hoặc hiện tạm ngừng phục vụ.`,
+          code: 'INVALID_MENU_ITEM',
+          field: 'selectedDishes'
+        });
+      }
+      const qty = Number(item.quantity);
+      verifiedPreOrderTotal += menuDish.price * qty;
+      verifiedSelectedDishes.push({
+        ...item,
+        dish: menuDish,
+        quantity: qty,
+      });
+    }
+
+    // 10. Kiểm tra và tính giảm giá Voucher tại Server (hạn sử dụng, đơn tối thiểu, hạng thành viên)
+    let verifiedDiscount = 0;
+    const inputVoucher = newRes.voucherCode ? String(newRes.voucherCode).trim().toUpperCase() : null;
+    if (inputVoucher) {
+      const foundVoucher = INITIAL_VOUCHERS.find(v => v.code.toUpperCase() === inputVoucher);
+      if (!foundVoucher) {
+        return res.status(400).json({
+          error: `Mã ưu đãi "${inputVoucher}" không hợp lệ hoặc không tồn tại.`,
+          code: 'INVALID_VOUCHER',
+          field: 'voucherCode'
+        });
+      }
+      if (isVoucherExpired(foundVoucher.expiryDate)) {
+        return res.status(400).json({
+          error: `Mã ưu đãi "${foundVoucher.code}" đã hết hạn sử dụng (${foundVoucher.expiryDate}).`,
+          code: 'VOUCHER_EXPIRED',
+          field: 'voucherCode'
+        });
+      }
+      if (verifiedPreOrderTotal < foundVoucher.minOrder) {
+        return res.status(400).json({
+          error: `Đơn thực đơn chọn trước tối thiểu phải từ ${foundVoucher.minOrder.toLocaleString('vi-VN')}đ để áp dụng mã ${foundVoucher.code}.`,
+          code: 'VOUCHER_MIN_ORDER',
+          field: 'voucherCode'
+        });
+      }
+      if (foundVoucher.tierRequired) {
+        if (!resolvedUserId) {
+          return res.status(403).json({
+            error: `Mã "${foundVoucher.code}" chỉ áp dụng cho thành viên hạng ${foundVoucher.tierRequired} trở lên. Vui lòng đăng nhập.`,
+            code: 'VOUCHER_TIER_REQUIRED',
+            field: 'voucherCode'
+          });
+        }
+        const matchedUser = localUsers.find(u => u.id === resolvedUserId);
+        const TIER_ORDER: Record<string, number> = {
+          'Đồng': 1,
+          'Bạc': 2,
+          'Vàng': 3,
+          'Kim Cương': 4,
+        };
+        const userRank = matchedUser ? (TIER_ORDER[matchedUser.membershipTier] || 1) : 0;
+        const reqRank = TIER_ORDER[foundVoucher.tierRequired] || 1;
+        if (userRank < reqRank) {
+          return res.status(403).json({
+            error: `Mã "${foundVoucher.code}" yêu cầu hạng thành viên ${foundVoucher.tierRequired} trở lên.`,
+            code: 'VOUCHER_TIER_REQUIRED',
+            field: 'voucherCode'
+          });
+        }
+      }
+
+      if (foundVoucher.discountPercent) {
+        verifiedDiscount = Math.round((verifiedPreOrderTotal * foundVoucher.discountPercent) / 100);
+      } else if (foundVoucher.discountAmount) {
+        verifiedDiscount = foundVoucher.discountAmount;
+      }
+      verifiedDiscount = Math.min(verifiedPreOrderTotal, verifiedDiscount);
+    }
+
+    // Mutex bảo vệ chống Race condition đồng thời trên TẤT CẢ các bàn (chính + ghép), sắp xếp theo thứ tự tránh deadlock
+    const sortedLockKeys = [...allRequestedTableIds].sort().map(tid => `${bookingDate}_${tid}`);
+    const releaseLocks: Array<() => void> = [];
+    for (const key of sortedLockKeys) {
+      releaseLocks.push(await acquireSlotLock(key));
+    }
+    const releaseLock = () => {
+      while (releaseLocks.length > 0) {
+        const fn = releaseLocks.pop();
+        if (fn) fn();
+      }
+    };
 
     try {
-      // 8. Vấn đề 1: KIỂM TRA TRÙNG BÀN CÙNG KHUNG GIỜ (Cửa sổ phục vụ 120 phút theo SRS)
+      // 8. Vấn đề 1: KIỂM TRA TRÙNG BÀN (CẢ BÀN CHÍNH VÀ BÀN GHÉP) CÙNG KHUNG GIỜ (Cửa sổ phục vụ 120 phút theo SRS)
       let currentReservationsForDate: any[] = [];
       try {
         currentReservationsForDate = await db.select().from(reservations).where(eq(reservations.bookingDate, bookingDate));
@@ -659,99 +832,66 @@ async function startServer() {
         currentReservationsForDate = localReservations.filter(r => r.bookingDate === bookingDate);
       }
 
+      let conflictedTableId: string | null = null;
       const conflictingReservation = currentReservationsForDate.find(r => {
         if (r.status === 'cancelled') return false;
-        const isSameTable = r.tableId === targetTable.id || (r.selectedMergedTableIds && r.selectedMergedTableIds.includes(targetTable.id));
-        if (!isSameTable) return false;
-        // Trùng hoặc giao thoa khung giờ trong bán kính 120 phút dùng bữa
-        return areTimeSlotsOverlapping(r.arrivalTime, arrivalTime, 120);
+        const existingTableSet = new Set<string>([
+          r.tableId,
+          ...(Array.isArray(r.tableIds) ? r.tableIds : []),
+          ...(Array.isArray(r.selectedMergedTableIds) ? r.selectedMergedTableIds : []),
+        ].filter(Boolean));
+        const overlapId = allRequestedTableIds.find(reqTid => existingTableSet.has(reqTid));
+        if (!overlapId) return false;
+        if (areTimeSlotsOverlapping(r.arrivalTime, arrivalTime, 120)) {
+          conflictedTableId = overlapId;
+          return true;
+        }
+        return false;
       });
 
       if (conflictingReservation) {
+        const conflictTableObj = localTables.find(t => t.id === conflictedTableId) || targetTable;
         return res.status(409).json({
-          error: `Bàn ${targetTable.name} đã được khách khác đặt vào lúc ${conflictingReservation.arrivalTime} ngày ${bookingDate} (Mã đơn: #${conflictingReservation.bookingCode}). Vui lòng chọn bàn khác hoặc khung giờ cách ít nhất 120 phút.`,
+          error: `Bàn ${conflictTableObj.name} đã được khách khác đặt vào lúc ${conflictingReservation.arrivalTime} ngày ${bookingDate} (Mã đơn: #${conflictingReservation.bookingCode}). Vui lòng chọn bàn khác hoặc khung giờ cách ít nhất 120 phút.`,
           code: 'TABLE_SLOT_CONFLICT',
           conflictingBookingCode: conflictingReservation.bookingCode,
           conflictingTime: conflictingReservation.arrivalTime,
-          tableId: targetTable.id,
-          tableName: targetTable.name
+          tableId: conflictTableObj.id,
+          tableName: conflictTableObj.name
         });
       }
 
-      // 9. Server-authoritative Pricing: Tự tính tiền món dựa trên menu gốc phía Server
-      let verifiedPreOrderTotal = 0;
-      const verifiedSelectedDishes = (rawDishes || []).map((item: any) => {
-        const dishId = item.dish?.id || item.dishId || (item.menuItemId ? `m-${String(item.menuItemId).padStart(2, '0')}` : null);
-        const originalPrice = (dishId && MENU_PRICE_MAP.get(dishId)) || item.dish?.price || item.price || 0;
-        const qty = Number(item.quantity) || 1;
-        verifiedPreOrderTotal += originalPrice * qty;
-        return {
-          ...item,
-          dish: {
-            ...(item.dish || {}),
-            id: dishId || item.dish?.id || 'm-custom',
-            price: originalPrice,
-          },
-          quantity: qty,
-        };
-      });
+      // Kiểm tra mã bookingCode trùng lặp nếu client truyền lên; ngược lại sinh mã LGB-XXXXX duy nhất
+      let allExistingCodes = new Set<string>(localReservations.map(r => (r.bookingCode || '').toUpperCase()));
+      try {
+        const dbCodes = await db.select({ bookingCode: reservations.bookingCode }).from(reservations);
+        dbCodes.forEach(row => {
+          if (row.bookingCode) allExistingCodes.add(row.bookingCode.toUpperCase());
+        });
+      } catch {}
 
-      // 10. Tự kiểm tra và tính giảm giá Voucher tại Server (chặn khách vãng lai dùng voucher VIP)
-      let verifiedDiscount = 0;
-      const inputVoucher = newRes.voucherCode ? String(newRes.voucherCode).trim().toUpperCase() : null;
-      if (inputVoucher) {
-        const foundVoucher = INITIAL_VOUCHERS.find(v => v.code.toUpperCase() === inputVoucher);
-        if (foundVoucher && verifiedPreOrderTotal >= foundVoucher.minOrder) {
-          let isEligible = true;
-
-          // Kiểm tra điều kiện hạng thành viên nếu voucher yêu cầu
-          if (foundVoucher.tierRequired) {
-            const bookingUserId = newRes.userId;
-            if (!bookingUserId) {
-              isEligible = false; // Người dùng tự do / vãng lai không được dùng voucher hạng VIP
-            } else {
-              const matchedUser = localUsers.find(u => u.id === bookingUserId);
-              const TIER_ORDER: Record<string, number> = {
-                'Đồng': 1,
-                'Bạc': 2,
-                'Vàng': 3,
-                'Kim Cương': 4,
-              };
-              const userRank = matchedUser ? (TIER_ORDER[matchedUser.membershipTier] || 1) : 0;
-              const reqRank = TIER_ORDER[foundVoucher.tierRequired] || 1;
-              if (userRank < reqRank) {
-                isEligible = false;
-              }
-            }
-          }
-
-          if (isEligible) {
-            if (foundVoucher.discountPercent) {
-              verifiedDiscount = Math.round((verifiedPreOrderTotal * foundVoucher.discountPercent) / 100);
-            } else if (foundVoucher.discountAmount) {
-              verifiedDiscount = foundVoucher.discountAmount;
-            }
-            verifiedDiscount = Math.min(verifiedPreOrderTotal, verifiedDiscount);
-          }
+      let finalBookingCode = newRes.bookingCode ? String(newRes.bookingCode).trim().toUpperCase() : '';
+      if (finalBookingCode) {
+        if (allExistingCodes.has(finalBookingCode)) {
+          return res.status(409).json({
+            error: `Mã đặt bàn "${finalBookingCode}" đã tồn tại trong hệ thống.`,
+            code: 'DUPLICATE_BOOKING_CODE',
+            field: 'bookingCode'
+          });
         }
-      }
-
-      // Sinh mã đặt chỗ duy nhất dạng LGB-XXXXX theo SRS
-      let finalBookingCode = newRes.bookingCode;
-      if (!finalBookingCode) {
+      } else {
         let candidate = generateBookingCodeString();
-        while (localReservations.some(r => r.bookingCode === candidate)) {
+        while (allExistingCodes.has(candidate.toUpperCase())) {
           candidate = generateBookingCodeString();
         }
         finalBookingCode = candidate;
       }
 
-      // 11. Xử lý tiêu điểm tích lũy giảm giá hóa đơn (Mục 1)
+      // 11. Xử lý tiêu điểm tích lũy giảm giá hóa đơn (chỉ cho chính chủ đã xác thực JWT)
       let verifiedPointsRedeemed = 0;
       let verifiedPointsDiscount = 0;
-      const requestedPoints = Number(newRes.pointsRedeemed) || 0;
-      if (requestedPoints > 0 && newRes.userId) {
-        const targetUser = localUsers.find(u => u.id === newRes.userId);
+      if (requestedPoints > 0 && resolvedUserId) {
+        const targetUser = localUsers.find(u => u.id === resolvedUserId);
         if (targetUser && targetUser.loyaltyPoints >= requestedPoints) {
           // 1 điểm = 100đ, tối đa 30% giá trị còn lại của thực đơn chọn trước
           const remainingAmount = Math.max(0, verifiedPreOrderTotal - verifiedDiscount);
@@ -795,10 +935,16 @@ async function startServer() {
       // Công thức điểm thưởng chuẩn SRS 4.2.8: 1 điểm cho mỗi 10.000đ thanh toán
       const calculatedPoints = Math.floor(verifiedFinalTotal / 10000);
 
+      // Trạng thái ban đầu luôn là 'pending' đối với đơn đặt trực tuyến (chỉ staff/admin mới được đặt trực tiếp 'confirmed')
+      const enforcedInitialStatus: ValidStatus =
+        authenticatedUser && ['admin', 'staff'].includes(authenticatedUser.role) && newRes.status === 'confirmed'
+          ? 'confirmed'
+          : 'pending';
+
       const reservationData = {
         id: newRes.id || `res_${Date.now()}`,
         bookingCode: finalBookingCode,
-        userId: newRes.userId || null,
+        userId: resolvedUserId,
         customerName,
         customerPhone,
         customerEmail: customerEmail || '',
@@ -806,7 +952,8 @@ async function startServer() {
         bookingDate,
         arrivalTime,
         tableId: targetTable.id,
-        tableName: targetTable.name,
+        tableIds: allRequestedTableIds,
+        tableName: allRequestedTableNames,
         tableArea: targetTable.area,
         selectedDishes: verifiedSelectedDishes,
         preOrderTotal: verifiedPreOrderTotal,
@@ -816,7 +963,7 @@ async function startServer() {
         pointsDiscount: verifiedPointsDiscount,
         voucherCode: inputVoucher,
         totalAmount: verifiedFinalTotal,
-        status: (newRes.status || 'pending') as ValidStatus, // Trạng thái ban đầu luôn là 'pending' theo SRS 4.1.4.1
+        status: enforcedInitialStatus,
         occasion: newRes.occasion ? String(newRes.occasion).trim() : null,
         specialRequests: newRes.specialRequests ? String(newRes.specialRequests).trim() : null,
         emailConfirmationSent: newRes.emailConfirmationSent ?? true,
@@ -832,13 +979,58 @@ async function startServer() {
       const diffToArrival = arrivalMinutes - nowMinutes;
       const shouldMarkReservedToday = isToday && diffToArrival >= -60 && diffToArrival <= 180;
 
+      const confirmEmailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1c1917; background-color: #fafaf9; border-radius: 12px; border: 1px solid #e7e5e4;">
+          <div style="text-align: center; border-bottom: 2px solid #d97706; padding-bottom: 14px; margin-bottom: 16px;">
+            <h1 style="color: #1c1917; margin: 0; font-size: 20px; letter-spacing: 1px;">LE GOURMET BISTRO</h1>
+            <p style="color: #78716c; margin: 4px 0 0; font-size: 12px;">Ẩm Thực Pháp Tinh Hoa • 128 Nguyễn Huệ, Quận 1, TP.HCM</p>
+          </div>
+          <h2 style="color: #b45309; font-size: 16px; margin-top: 0;">Tiếp Nhận & Xác Nhận Đặt Bàn #${reservationData.bookingCode}</h2>
+          <p style="font-size: 13px;">Kính gửi quý khách <strong>${reservationData.customerName}</strong>,</p>
+          <p style="font-size: 13px; color: #44403c;">Hệ thống đã ghi nhận yêu cầu đặt bàn của quý khách với thông tin chi tiết:</p>
+          <table style="width: 100%; border-collapse: collapse; margin: 12px 0; background: #ffffff; border: 1px solid #e7e5e4; font-size: 13px;">
+            <tr style="border-bottom: 1px solid #f5f5f4;"><td style="padding: 8px 12px; color: #78716c;">Mã đặt bàn:</td><td style="padding: 8px 12px; font-weight: bold; color: #b45309;">#${reservationData.bookingCode}</td></tr>
+            <tr style="border-bottom: 1px solid #f5f5f4;"><td style="padding: 8px 12px; color: #78716c;">Thời gian:</td><td style="padding: 8px 12px; font-weight: bold;">${reservationData.arrivalTime} • ${reservationData.bookingDate}</td></tr>
+            <tr style="border-bottom: 1px solid #f5f5f4;"><td style="padding: 8px 12px; color: #78716c;">Bàn & Số khách:</td><td style="padding: 8px 12px;">${reservationData.tableName} (${reservationData.guestCount} người)</td></tr>
+            <tr style="border-bottom: 1px solid #f5f5f4;"><td style="padding: 8px 12px; color: #78716c;">Tổng tạm tính:</td><td style="padding: 8px 12px; font-weight: bold;">${reservationData.totalAmount.toLocaleString('vi-VN')} đ</td></tr>
+            <tr><td style="padding: 8px 12px; color: #78716c;">Tiền cọc:</td><td style="padding: 8px 12px;">${reservationData.depositAmount.toLocaleString('vi-VN')} đ</td></tr>
+          </table>
+          ${reservationData.specialRequests ? `<p style="font-size: 12px; color: #57534e;"><strong>Yêu cầu đặc biệt:</strong> ${reservationData.specialRequests}</p>` : ''}
+          <p style="font-size: 12px; color: #78716c; margin-top: 12px;">Hotline hỗ trợ: <strong>0903.888.999</strong></p>
+        </div>
+      `;
+      const confirmEmailLog = {
+        id: `em-${Date.now()}`,
+        recipientEmail: reservationData.customerEmail || 'customer@example.com',
+        recipientName: reservationData.customerName,
+        bookingCode: reservationData.bookingCode,
+        sentAt: reservationData.emailSentAt,
+        subject: `✨ Xác nhận đặt bàn #${reservationData.bookingCode} - Nhà Hàng Le Gourmet Bistro`,
+        status: 'delivered',
+        type: 'booking_confirmation',
+        previewBody: confirmEmailHtml,
+      };
+
       try {
         const inserted = await db.insert(reservations).values(reservationData).returning();
-        
+        try {
+          await db.insert(emailLogs).values(confirmEmailLog).onConflictDoNothing();
+        } catch {
+          localEmailLogs.unshift({
+            ...confirmEmailLog,
+            toEmail: confirmEmailLog.recipientEmail,
+            toName: confirmEmailLog.recipientName,
+            reservationId: reservationData.id,
+            htmlContent: confirmEmailHtml,
+          } as any);
+        }
+
         if (shouldMarkReservedToday) {
-          await db.update(tables)
-            .set({ status: 'reserved', currentReservationId: reservationData.bookingCode })
-            .where(eq(tables.id, targetTable.id));
+          for (const tid of allRequestedTableIds) {
+            await db.update(tables)
+              .set({ status: 'reserved', currentReservationId: reservationData.bookingCode })
+              .where(eq(tables.id, tid));
+          }
         }
 
         res.status(201).json(
@@ -848,10 +1040,19 @@ async function startServer() {
         );
       } catch (error) {
         localReservations.unshift(reservationData as any);
+        localEmailLogs.unshift({
+          ...confirmEmailLog,
+          toEmail: confirmEmailLog.recipientEmail,
+          toName: confirmEmailLog.recipientName,
+          reservationId: reservationData.id,
+          htmlContent: confirmEmailHtml,
+        } as any);
         if (shouldMarkReservedToday) {
-          const tIdx = localTables.findIndex(t => t.id === targetTable.id);
-          if (tIdx !== -1) {
-            localTables[tIdx] = { ...localTables[tIdx], status: 'reserved', currentReservationId: reservationData.bookingCode };
+          for (const tid of allRequestedTableIds) {
+            const tIdx = localTables.findIndex(t => t.id === tid);
+            if (tIdx !== -1) {
+              localTables[tIdx] = { ...localTables[tIdx], status: 'reserved', currentReservationId: reservationData.bookingCode };
+            }
           }
         }
         res.status(201).json(reservationData);
@@ -935,8 +1136,12 @@ async function startServer() {
     }
 
     // 6. GIẢI PHÓNG HOẶC ĐIỀU CHỈNH TRẠNG THÁI BÀN (TABLE SIDE EFFECTS)
-    const targetTableId = currentReservation.tableId;
-    if (targetTableId) {
+    const reservationTableIds: string[] = Array.from(new Set([
+      currentReservation.tableId,
+      ...(Array.isArray(currentReservation.tableIds) ? currentReservation.tableIds : []),
+    ].filter(Boolean)));
+
+    if (reservationTableIds.length > 0) {
       if (newStatus === 'completed' || newStatus === 'cancelled') {
         // Tự động tích lũy điểm khi hoàn tất dùng bữa (Mục 4)
         if (newStatus === 'completed' && currentReservation.userId && currentReservation.pointsEarned > 0) {
@@ -973,27 +1178,31 @@ async function startServer() {
           }
         }
 
-        // Khi hoàn tất hoặc hủy đơn -> Giải phóng bàn về available
-        try {
-          await db.update(tables)
-            .set({ status: 'available', currentReservationId: null })
-            .where(eq(tables.id, targetTableId));
-        } catch {
-          const tIdx = localTables.findIndex(t => t.id === targetTableId);
-          if (tIdx !== -1) {
-            localTables[tIdx] = { ...localTables[tIdx], status: 'available', currentReservationId: undefined };
+        // Khi hoàn tất hoặc hủy đơn -> Giải phóng toàn bộ bàn (kể cả bàn ghép) về available
+        for (const tid of reservationTableIds) {
+          try {
+            await db.update(tables)
+              .set({ status: 'available', currentReservationId: null })
+              .where(eq(tables.id, tid));
+          } catch {
+            const tIdx = localTables.findIndex(t => t.id === tid);
+            if (tIdx !== -1) {
+              localTables[tIdx] = { ...localTables[tIdx], status: 'available', currentReservationId: undefined };
+            }
           }
         }
       } else if (newStatus === 'checked_in' || newStatus === 'seated') {
-        // Khi khách đã nhận bàn hoặc đang dùng bữa -> Đánh dấu occupied
-        try {
-          await db.update(tables)
-            .set({ status: 'occupied', currentReservationId: currentReservation.bookingCode })
-            .where(eq(tables.id, targetTableId));
-        } catch {
-          const tIdx = localTables.findIndex(t => t.id === targetTableId);
-          if (tIdx !== -1) {
-            localTables[tIdx] = { ...localTables[tIdx], status: 'occupied', currentReservationId: currentReservation.bookingCode };
+        // Khi khách đã nhận bàn hoặc đang dùng bữa -> Đánh dấu occupied toàn bộ bàn
+        for (const tid of reservationTableIds) {
+          try {
+            await db.update(tables)
+              .set({ status: 'occupied', currentReservationId: currentReservation.bookingCode })
+              .where(eq(tables.id, tid));
+          } catch {
+            const tIdx = localTables.findIndex(t => t.id === tid);
+            if (tIdx !== -1) {
+              localTables[tIdx] = { ...localTables[tIdx], status: 'occupied', currentReservationId: currentReservation.bookingCode };
+            }
           }
         }
       }
@@ -1029,8 +1238,24 @@ async function startServer() {
       });
     }
 
-    // Kiểm tra số điện thoại nếu có gửi lên để bảo mật
-    if (customerPhone) {
+    // Bắt buộc xác thực số điện thoại đối với khách tự hủy (chỉ Admin/Staff có JWT mới được miễn)
+    const cancelAuthHeader = req.headers['authorization'];
+    const cancelToken = cancelAuthHeader && cancelAuthHeader.startsWith('Bearer ') ? cancelAuthHeader.slice(7) : null;
+    let cancelCaller: AuthenticatedUserPayload | null = null;
+    if (cancelToken) {
+      try {
+        cancelCaller = jwt.verify(cancelToken, JWT_SECRET) as AuthenticatedUserPayload;
+      } catch {}
+    }
+    const isPrivilegedCanceller = Boolean(cancelCaller && ['admin', 'staff'].includes(cancelCaller.role));
+
+    if (!isPrivilegedCanceller) {
+      if (!customerPhone || !String(customerPhone).trim()) {
+        return res.status(400).json({
+          error: 'Vui lòng cung cấp số điện thoại đặt bàn để xác thực hủy đơn.',
+          code: 'PHONE_REQUIRED'
+        });
+      }
       const cleanPhoneInput = String(customerPhone).trim().replace(/\s+/g, '');
       const cleanResPhone = String(currentReservation.customerPhone || '').trim().replace(/\s+/g, '');
       if (cleanPhoneInput !== cleanResPhone) {
@@ -1085,15 +1310,18 @@ async function startServer() {
       }
     }
 
-    // 4. Giải phóng bàn ngay lập tức về 'available'
-    const targetTableId = currentReservation.tableId;
-    if (targetTableId) {
+    // 4. Giải phóng toàn bộ bàn (bao gồm cả bàn ghép) ngay lập tức về 'available'
+    const cancelTableIds: string[] = Array.from(new Set([
+      currentReservation.tableId,
+      ...(Array.isArray(currentReservation.tableIds) ? currentReservation.tableIds : []),
+    ].filter(Boolean)));
+    for (const tid of cancelTableIds) {
       try {
         await db.update(tables)
           .set({ status: 'available', currentReservationId: null })
-          .where(eq(tables.id, targetTableId));
+          .where(eq(tables.id, tid));
       } catch {
-        const tIdx = localTables.findIndex(t => t.id === targetTableId);
+        const tIdx = localTables.findIndex(t => t.id === tid);
         if (tIdx !== -1) {
           localTables[tIdx] = { ...localTables[tIdx], status: 'available', currentReservationId: undefined };
         }
@@ -1199,9 +1427,15 @@ async function startServer() {
     });
   });
 
-  // API Sổ cái biến động điểm thành viên (Mục 3: Points Transaction History)
-  app.get('/api/users/:id/points-ledger', async (req, res) => {
+  // API Sổ cái biến động điểm thành viên (Mục 3: Points Transaction History) - Bắt buộc JWT & chống IDOR
+  app.get('/api/users/:id/points-ledger', authenticateToken, async (req: AuthenticatedRequest, res) => {
     const { id } = req.params;
+    if (req.user?.role !== 'admin' && req.user?.id !== id) {
+      return res.status(403).json({
+        error: 'Forbidden: Bạn không có quyền xem sổ cái điểm của tài khoản khác.',
+        code: 'ACCESS_DENIED'
+      });
+    }
     const userTxs = localPointsTransactions.filter(tx => tx.userId === id);
     res.json(userTxs);
   });
@@ -1222,7 +1456,7 @@ async function startServer() {
     }
   });
 
-  // SRS 4.2.1 / TC-12: Đăng ký thành viên, kiểm tra trùng email và mật khẩu tối thiểu 6 ký tự
+  // SRS 4.2.1 / TC-12: Đăng ký thành viên, kiểm tra trùng email/SĐT, tên 2-100 ký tự, mật khẩu >= 6 ký tự, khóa mặc định Đồng/0 điểm
   app.post('/api/users', async (req, res) => {
     const userData = req.body || {};
     const name = String(userData.name || '').trim();
@@ -1230,9 +1464,9 @@ async function startServer() {
     const phone = String(userData.phone || '').trim().replace(/\s+/g, '');
     const password = String(userData.password || '').trim();
 
-    if (!name || name.length < 2) {
+    if (!name || name.length < 2 || name.length > 100) {
       return res.status(400).json({
-        error: 'Họ tên là bắt buộc và phải có ít nhất 2 ký tự.',
+        error: 'Họ tên là bắt buộc và phải có độ dài từ 2 đến 100 ký tự.',
         code: 'INVALID_NAME',
         field: 'name'
       });
@@ -1262,8 +1496,15 @@ async function startServer() {
       });
     }
 
+    let existingDbUsers: any[] = [];
+    try {
+      existingDbUsers = await db.select().from(users);
+    } catch {}
+
+    const allKnownUsers = [...localUsers, ...existingDbUsers];
+
     // Chống trùng lặp email khi đăng ký tài khoản (SRS TC-12)
-    const emailExists = localUsers.some(u => (u.email || '').toLowerCase() === email);
+    const emailExists = allKnownUsers.some(u => (u.email || '').toLowerCase() === email);
     if (emailExists) {
       return res.status(409).json({
         error: 'Email này đã tồn tại trong hệ thống. Vui lòng đăng nhập hoặc sử dụng email khác.',
@@ -1272,28 +1513,39 @@ async function startServer() {
       });
     }
 
+    // Chống trùng lặp số điện thoại khi đăng ký tài khoản
+    const phoneExists = allKnownUsers.some(u => (u.phone || '').replace(/\s+/g, '') === phone);
+    if (phoneExists) {
+      return res.status(409).json({
+        error: 'Số điện thoại này đã được đăng ký cho tài khoản khác.',
+        code: 'PHONE_ALREADY_EXISTS',
+        field: 'phone'
+      });
+    }
+
+    // Chống Mass Assignment: luôn khóa cứng role='customer', membershipTier='Đồng', loyaltyPoints=0 từ phía Server
     const userToInsert = {
-      id: userData.id || `user-${Date.now()}`,
+      id: `user-${Date.now()}`,
       email,
       name,
       phone,
       role: 'customer' as const,
-      membershipTier: userData.membershipTier || 'Đồng', // Hạng mặc định là Đồng (0-499 điểm theo SRS 4.2.8)
-      loyaltyPoints: Number(userData.loyaltyPoints) || 0,
-      avatar: userData.avatar || null,
-      favoriteDishIds: userData.favoriteDishIds || [],
-      dietaryPreferences: userData.dietaryPreferences || '',
-      createdAt: toValidDate(userData.createdAt),
+      membershipTier: 'Đồng' as const,
+      loyaltyPoints: 0,
+      avatar: null,
+      favoriteDishIds: Array.isArray(userData.favoriteDishIds) ? userData.favoriteDishIds : [],
+      dietaryPreferences: typeof userData.dietaryPreferences === 'string' ? userData.dietaryPreferences.trim() : '',
+      createdAt: new Date(),
     };
 
     // Băm mật khẩu an toàn bằng bcrypt
     serverPasswordHashes[userToInsert.id] = bcrypt.hashSync(password, 10);
+    localUsers.push(userToInsert as any);
 
     try {
       const inserted = await db.insert(users).values(userToInsert).returning();
-      res.status(201).json(inserted[0] || userToInsert);
+      res.status(201).json(inserted[0] ? { ...inserted[0], role: 'customer' } : userToInsert);
     } catch (error) {
-      localUsers.push(userToInsert as any);
       res.status(201).json(userToInsert);
     }
   });
@@ -1354,14 +1606,31 @@ async function startServer() {
         bookingCode: l.bookingCode || '',
         sentAt: l.sentAt || '',
         subject: l.subject || '',
-        type: l.type || 'confirmation',
+        type: l.type || 'booking_confirmation',
         htmlContent: l.previewBody || '',
         previewBody: l.previewBody || '',
         status: l.status || 'delivered',
       }));
       res.json(formatted);
     } catch (error) {
-      res.json(localEmailLogs);
+      const sortedLocal = [...localEmailLogs]
+        .map((l: any) => ({
+          id: l.id,
+          toEmail: l.toEmail || l.recipientEmail || '',
+          toName: l.toName || l.recipientName || '',
+          recipientEmail: l.recipientEmail || l.toEmail || '',
+          recipientName: l.recipientName || l.toName || '',
+          bookingCode: l.bookingCode || '',
+          sentAt: l.sentAt || '',
+          subject: l.subject || '',
+          type: l.type || 'booking_confirmation',
+          htmlContent: l.htmlContent || l.previewBody || '',
+          previewBody: l.previewBody || l.htmlContent || '',
+          status: l.status || 'delivered',
+          reservationId: l.reservationId || '',
+        }))
+        .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
+      res.json(sortedLocal);
     }
   });
 
@@ -1375,16 +1644,40 @@ async function startServer() {
       sentAt: typeof log.sentAt === 'string' ? log.sentAt : new Date().toISOString(),
       subject: log.subject || '',
       status: log.status || 'delivered',
-      type: log.type || 'confirmation',
+      type: log.type || 'booking_confirmation',
       previewBody: log.previewBody || log.htmlContent || '',
     };
     try {
-      const inserted = await db.insert(emailLogs).values(formattedLog).returning();
+      const inserted = await db.insert(emailLogs).values(formattedLog).onConflictDoNothing().returning();
       res.status(201).json(inserted[0] || formattedLog);
     } catch (error) {
-      localEmailLogs.unshift(formattedLog as any);
+      if (!localEmailLogs.some((e) => e.id === formattedLog.id)) {
+        localEmailLogs.unshift({
+          ...formattedLog,
+          toEmail: formattedLog.recipientEmail,
+          toName: formattedLog.recipientName,
+          htmlContent: formattedLog.previewBody,
+        } as any);
+      }
       res.status(201).json(formattedLog);
     }
+  });
+
+  app.delete('/api/email-logs/:id', authenticateToken, requireRoles(['admin', 'staff']), async (req: AuthenticatedRequest, res) => {
+    const { id } = req.params;
+    try {
+      await db.delete(emailLogs).where(eq(emailLogs.id, id));
+    } catch {}
+    localEmailLogs = localEmailLogs.filter((l) => l.id !== id);
+    res.json({ success: true, deletedId: id });
+  });
+
+  app.delete('/api/email-logs', authenticateToken, requireRoles(['admin', 'staff']), async (req: AuthenticatedRequest, res) => {
+    try {
+      await db.delete(emailLogs);
+    } catch {}
+    localEmailLogs = [];
+    res.json({ success: true });
   });
 
   // -------------------------------------------------------------

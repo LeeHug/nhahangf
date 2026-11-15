@@ -43,6 +43,7 @@ interface AdminDashboardProps {
   onStatusChange: (reservationId: string, status: ReservationStatus) => void;
   onUpdateTableStatus: (tableId: string, status: TableStatus) => void;
   onOpenEmailPreview: (reservation: Reservation) => void;
+  onOpenEmailInbox?: () => void;
   onCreateManualReservation: (data: any) => void;
   onSaveDishesAtTable?: (reservationId: string, dishesToAdd: any[]) => void;
   onConfirmCheckout?: (reservationId: string, paymentDetails: any) => void;
@@ -59,6 +60,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onStatusChange,
   onUpdateTableStatus,
   onOpenEmailPreview,
+  onOpenEmailInbox,
   onCreateManualReservation,
   onSaveDishesAtTable,
   onConfirmCheckout,
@@ -554,6 +556,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               onConfirmCheckout={onConfirmCheckout || (() => {})}
               onOpenManualBooking={() => setShowManualModal(true)}
               onOpenKDS={() => setActiveTab('kds')}
+              onOpenEmailPreview={onOpenEmailPreview}
+              onOpenEmailInbox={onOpenEmailInbox}
             />
           )}
 

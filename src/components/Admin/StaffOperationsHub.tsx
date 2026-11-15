@@ -22,7 +22,8 @@ import {
   ClipboardCheck,
   Send,
   ChefHat,
-  Bell
+  Bell,
+  Mail
 } from 'lucide-react';
 import { Reservation, RestaurantTable, TableStatus, ReservationStatus, UserAccount, TableServiceRequest } from '../../types';
 import { formatVND, getStoredTableServiceRequests, updateTableServiceRequestStatus } from '../../services/storage';
@@ -40,6 +41,8 @@ interface StaffOperationsHubProps {
   onConfirmCheckout: (reservationId: string, paymentDetails: any) => void;
   onOpenManualBooking: () => void;
   onOpenKDS?: () => void;
+  onOpenEmailPreview?: (reservation: Reservation) => void;
+  onOpenEmailInbox?: () => void;
 }
 
 export const StaffOperationsHub: React.FC<StaffOperationsHubProps> = ({
@@ -52,6 +55,8 @@ export const StaffOperationsHub: React.FC<StaffOperationsHubProps> = ({
   onConfirmCheckout,
   onOpenManualBooking,
   onOpenKDS,
+  onOpenEmailPreview,
+  onOpenEmailInbox,
 }) => {
   const [fastSearchQuery, setFastSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'today_all' | 'confirmed' | 'seated' | 'completed'>('today_all');
@@ -166,7 +171,19 @@ export const StaffOperationsHub: React.FC<StaffOperationsHubProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {onOpenEmailInbox && (
+              <button
+                type="button"
+                onClick={onOpenEmailInbox}
+                className="px-3.5 py-2.5 rounded-xl bg-stone-850 hover:bg-stone-750 text-stone-100 font-bold text-xs flex items-center gap-1.5 border border-stone-700/80 shadow-md cursor-pointer transition"
+                title="Xem toàn bộ nhật ký email đã gửi (cũ & mới)"
+              >
+                <Mail className="w-4 h-4 text-amber-400" />
+                <span>Hộp Thư Email</span>
+              </button>
+            )}
+
             {onOpenKDS && (
               <button
                 type="button"
@@ -385,7 +402,7 @@ export const StaffOperationsHub: React.FC<StaffOperationsHubProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => setSelectedCheckInRes(singleMatch)}
@@ -394,6 +411,18 @@ export const StaffOperationsHub: React.FC<StaffOperationsHubProps> = ({
                 <Printer className="w-3.5 h-3.5 text-amber-600" />
                 <span>Phiếu Check-in Bill</span>
               </button>
+
+              {onOpenEmailPreview && (
+                <button
+                  type="button"
+                  onClick={() => onOpenEmailPreview(singleMatch)}
+                  className="px-3 py-2 rounded-xl bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Xem nội dung email xác nhận của đơn này"
+                >
+                  <Mail className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Xem Email</span>
+                </button>
+              )}
 
               {singleMatch.status === 'confirmed' && (
                 <button
@@ -562,6 +591,17 @@ export const StaffOperationsHub: React.FC<StaffOperationsHubProps> = ({
                         >
                           <Printer className="w-3.5 h-3.5" />
                         </button>
+
+                        {onOpenEmailPreview && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenEmailPreview(res)}
+                            className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition cursor-pointer"
+                            title="Xem nội dung Email xác nhận"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                          </button>
+                        )}
 
                         {res.status === 'confirmed' && (
                           <button
@@ -795,6 +835,7 @@ export const StaffOperationsHub: React.FC<StaffOperationsHubProps> = ({
         <CheckInBillModal
           reservation={selectedCheckInRes}
           onClose={() => setSelectedCheckInRes(null)}
+          onOpenEmailPreview={onOpenEmailPreview}
         />
       )}
 

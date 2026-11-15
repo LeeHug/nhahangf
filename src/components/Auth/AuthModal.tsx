@@ -141,6 +141,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
+    if (regName.trim().length < 2 || regName.trim().length > 100) {
+      setErrorMessage('Họ và tên phải có độ dài từ 2 đến 100 ký tự!');
+      return;
+    }
+
     if (!regPassword || regPassword.length < 6) {
       setErrorMessage('Mật khẩu là bắt buộc và phải có tối thiểu 6 ký tự trở lên!');
       return;

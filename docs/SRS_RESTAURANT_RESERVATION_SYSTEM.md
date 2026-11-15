@@ -1,10 +1,10 @@
 # TÀI LIỆU ĐẶC TẢ YÊU CẦU PHẦN MỀM (SOFTWARE REQUIREMENTS SPECIFICATION - SRS)
 ## DỰ ÁN: HỆ THỐNG ĐẶT BÀN VÀ QUẢN LÝ NHÀ HÀNG CAO CẤP LE GOURMET BISTRO
 
-**Mã tài liệu:** SRS-LGB-2026-V3.0  
-**Phiên bản:** 3.0.0 (Production Baseline - Đồng bộ mã nguồn mới nhất)  
+**Mã tài liệu:** SRS-LGB-2026-V3.1  
+**Phiên bản:** 3.1.0 (Production Baseline - Đồng bộ mã nguồn & kiểm toán bảo mật)  
 **Tác giả:** Senior Business Analyst & Senior Software Engineer  
-**Ngày cập nhật:** 14/11/2026  
+**Ngày cập nhật:** 15/11/2026  
 **Trạng thái:** Approved / Synchronized with Latest Codebase  
 
 ### Lịch sử phiên bản (Revision History)
@@ -12,7 +12,8 @@
 | :--- | :--- | :--- |
 | **1.0.0** | 01/10/2026 | Khởi tạo đặc tả đặt bàn cơ bản và sơ đồ thực đơn. |
 | **2.0.0** | 25/10/2026 | Bổ sung JWT/Bcrypt, Conflict Detection Engine 120 phút, Finite State Machine và tích hợp kiểm thử tự động. |
-| **3.0.0** | 14/11/2026 | Đồng bộ hoàn toàn theo mã nguồn thực tế: tích hợp PostgreSQL + Drizzle ORM (có in-memory fallback), khắc phục phân quyền RBAC Staff/Admin và Voucher theo hạng thành viên, bổ sung tính năng **Khách hàng tự hủy đặt bàn (chính sách 120 phút)**, **Hệ thống tích điểm & Sổ cái điểm thưởng (Đổi điểm trực tiếp 30%, chờ hoàn tất đơn mới cộng điểm, hoàn điểm khi hủy)**, **KDS 4 trạm bếp**, **Kho & Định lượng BOM**, **Đánh giá CSAT/NPS**, và tách bỏ thư mục automation test độc lập khỏi repo chính. |
+| **3.0.0** | 14/11/2026 | Đồng bộ hoàn toàn theo mã nguồn thực tế: tích hợp PostgreSQL + Drizzle ORM, RBAC Staff/Admin, tự hủy 120 phút, Sổ cái điểm thưởng, KDS 4 trạm, Kho BOM, CSAT/NPS. |
+| **3.1.0** | 15/11/2026 | Khắc phục & chuẩn hóa toàn diện theo kiểm toán QA/Security: khóa & lưu danh sách bàn ghép (`table_ids`), không fallback `BK-xxxx` khi server trả `4xx/5xx`, chống Mass Assignment khi đăng ký/đặt bàn, bắt buộc JWT khi tiêu điểm & xem sổ cái điểm, bắt buộc SĐT khi hủy đơn, kiểm tra món hợp lệ & hạn voucher (`SWEETWINE`), kiểm tra ngày lịch dương & giờ mở cửa `10:00–22:30`, đồng bộ JWT 24h, `401` vs `403`, `skipSuccessfulRequests` trên Rate Limit, email đặt bàn tùy chọn và tên/SĐT trùng khi đăng ký. |
 
 ---
 
@@ -82,7 +83,7 @@ Hệ thống **Le Gourmet Bistro Restaurant Management & Reservation Platform** 
    - Tra cứu đơn bằng SĐT hoặc Mã Booking Code (`LGB-XXXXX`).
    - Chính sách tự hủy trực tuyến trước **120 phút**: tự động giải phóng bàn về `available`, gửi email xác nhận hủy, hiển thị thông báo hoàn 100% tiền cọc trong 24h làm việc và hoàn lại điểm thưởng đã quy đổi (nếu có). Khi quá hạn 120 phút, khóa nút tự hủy và hiển thị hotline quản lý (`0903.888.999`).
 3. **Phân hệ Thành Viên, Hạng Thẻ & Sổ Cái Điểm Thưởng (Loyalty System)**:
-   - Đăng ký/Đăng nhập bằng Bcrypt + JWT (7 ngày), quản lý hồ sơ, đổi mật khẩu, lưu món yêu thích.
+   - Đăng ký/Đăng nhập bằng Bcrypt + JWT (**24 giờ**), quản lý hồ sơ, đổi mật khẩu, lưu món yêu thích.
    - 4 hạng thành viên (`Đồng`: 0–399, `Bạc`: 400–999, `Vàng`: 1.000–2.499, `Kim Cương`: ≥ 2.500 điểm).
    - Quy đổi điểm trực tiếp khi đặt bàn (`1 điểm = 100đ`, tối đa 30% giá trị thực đơn còn lại sau voucher), điểm thưởng tạm tính chỉ được cộng vào ví khi đơn hoàn tất (`completed`), hoàn điểm khi hủy (`cancelled`), và theo dõi minh bạch qua **Sổ Cái Biến Động Điểm Thưởng**.
 4. **Phân hệ Phục Vụ Tại Bàn QR & Đánh Giá Khách Hàng (QR Table Service & CSAT/NPS)**:
@@ -255,7 +256,8 @@ Mọi chuyển đổi sai quy tắc (ví dụ `seated` → `cancelled`, `cancell
 ```
 
 - Khi tạo đơn đặt bàn cho **ngày tương lai** (> 180 phút trước giờ đến), bàn vẫn giữ nguyên `available` trên sơ đồ live hiện tại để không khóa nhầm khách walk-in; chỉ đánh dấu `reserved` trên sơ đồ khi đơn thuộc **ngày hôm nay** và trong cửa sổ `[-60, +180]` phút so với giờ hiện tại.
-- Khi đơn chuyển sang `completed` hoặc `cancelled`, bàn được tự động giải phóng về `available` và xóa `currentReservationId`.
+- Khi đơn chuyển sang `completed` hoặc `cancelled`, toàn bộ bàn thuộc đơn (bao gồm cả bàn chính và các bàn ghép trong `table_ids`) được tự động giải phóng về `available` và xóa `currentReservationId`.
+- Khi Staff/Admin cập nhật trực tiếp trạng thái bàn qua `PUT /api/tables/:id`, hệ thống chỉ chấp nhận 4 trạng thái hợp lệ: `available`, `reserved`, `occupied`, `cleaning` (trả `400 INVALID_TABLE_STATUS` nếu gửi giá trị khác).
 
 ---
 
@@ -394,7 +396,7 @@ Lưu trữ thông tin hồ sơ khách hàng thành viên và điểm/hạng thà
 | `email` | `text` | `NOT NULL` | Địa chỉ email đăng nhập |
 | `name` | `text` | `NOT NULL` | Họ và tên người dùng |
 | `phone` | `text` | `NOT NULL` | Số điện thoại liên hệ |
-| `membership_tier` | `text` | `NOT NULL, DEFAULT 'Bạc'` | Hạng thành viên: `'Đồng'`, `'Bạc'`, `'Vàng'`, `'Kim Cương'` |
+| `membership_tier` | `text` | `NOT NULL, DEFAULT 'Đồng'` | Hạng thành viên mặc định `'Đồng'`: `'Đồng'`, `'Bạc'`, `'Vàng'`, `'Kim Cương'` |
 | `loyalty_points` | `integer` | `NOT NULL, DEFAULT 0` | Số dư điểm thưởng khả dụng hiện tại |
 | `avatar` | `text` | `NULL` | Đường dẫn ảnh đại diện |
 | `favorite_dish_ids` | `jsonb` (`string[]`) | `DEFAULT []` | Danh sách ID các món ăn yêu thích |
@@ -427,20 +429,21 @@ Lưu trữ toàn bộ đơn đặt bàn trực tuyến và đặt bàn tại qu�
 | `user_id` | `text` | `NULL` | ID thành viên đặt bàn (null nếu là khách vãng lai) |
 | `customer_name` | `text` | `NOT NULL` | Họ tên khách hàng |
 | `customer_phone` | `text` | `NOT NULL` | Số điện thoại liên hệ & xác thực hủy bàn |
-| `customer_email` | `text` | `NOT NULL` | Email nhận phiếu xác nhận / thông báo hủy |
-| `guest_count` | `integer` | `NOT NULL` | Số lượng khách dự kiến |
-| `booking_date` | `text` | `NOT NULL` | Ngày đến dùng bữa (`YYYY-MM-DD`) |
-| `arrival_time` | `text` | `NOT NULL` | Giờ đến (`HH:mm`) |
-| `table_id` | `text` | `NOT NULL` | ID bàn được gán (hoặc bàn chính khi ghép bàn) |
-| `table_name` | `text` | `NOT NULL` | Tên bàn hiển thị |
+| `customer_email` | `text` | `NOT NULL` (chuỗi `''` nếu không nhập) | Email nhận phiếu xác nhận / thông báo hủy (tùy chọn khi đặt bàn; kiểm tra định dạng nếu có nhập) |
+| `guest_count` | `integer` | `NOT NULL` | Số lượng khách dự kiến (1–30 khách) |
+| `booking_date` | `text` | `NOT NULL` | Ngày đến dùng bữa (`YYYY-MM-DD`, hợp lệ theo lịch dương) |
+| `arrival_time` | `text` | `NOT NULL` | Giờ đến (`HH:mm`, khung giờ phục vụ `10:00 – 22:30`) |
+| `table_id` | `text` | `NOT NULL` | ID bàn chính được gán |
+| `table_ids` | `jsonb` (`string[]`) | `DEFAULT []` | Toàn bộ danh sách ID bàn chính + bàn ghép (VD: `['T-06', 'T-01']`) phục vụ khóa trùng lịch và giải phóng bàn |
+| `table_name` | `text` | `NOT NULL` | Tên bàn hiển thị (ghép nối bằng ` + ` nếu có nhiều bàn) |
 | `table_area` | `text` | `NOT NULL` | Khu vực bàn |
-| `selected_dishes` | `jsonb` | `NOT NULL, DEFAULT []` | Mảng món đặt trước (`SelectedDishItem[]`: món, SL, độ chín, ghi chú) |
+| `selected_dishes` | `jsonb` | `NOT NULL, DEFAULT []` | Mảng món đặt trước (`SelectedDishItem[]`: món chuẩn từ `MENU_ITEMS`, SL nguyên dương, độ chín, ghi chú) |
 | `pre_order_total` | `integer` | `NOT NULL, DEFAULT 0` | Tổng tiền thực đơn đặt trước (VNĐ) |
 | `deposit_amount` | `integer` | `NOT NULL, DEFAULT 0` | Tiền đặt cọc giữ bàn (20% tổng hóa đơn nếu chọn cọc) |
 | `discount_amount` | `integer` | `DEFAULT 0` | Tiền giảm từ voucher |
 | `voucher_code` | `text` | `NULL` | Mã voucher đã áp dụng |
 | `total_amount` | `integer` | `NOT NULL, DEFAULT 0` | Tổng hóa đơn sau giảm giá voucher và trừ điểm thưởng |
-| `status` | `text` | `NOT NULL, DEFAULT 'confirmed'` | Trạng thái FSM (`pending`, `confirmed`, `seated`/`checked_in`, `completed`, `cancelled`) |
+| `status` | `text` | `NOT NULL, DEFAULT 'pending'` | Trạng thái FSM (`pending`, `confirmed`, `seated`/`checked_in`, `completed`, `cancelled`). Đơn trực tuyến luôn khởi tạo ở `pending`. |
 | `occasion` | `text` | `NULL` | Dịp đặc biệt (Sinh nhật, Kỷ niệm, Tiếp khách...) |
 | `special_requests` | `text` | `NULL` | Yêu cầu đặc biệt (dị ứng, trang trí, ghép bàn) |
 | `email_confirmation_sent` | `boolean` | `DEFAULT true` | Cờ xác nhận đã gửi email |
@@ -484,23 +487,25 @@ Bên cạnh 4 bảng lõi trên PostgreSQL, hệ thống duy trì các mô hình
 - Kết hợp hiển thị các đơn khớp trong PostgreSQL/Server và `localStorage`, hỗ trợ mở phiếu Check-in điện tử (`CheckInBill`) hoặc kích hoạt hủy bàn trực tiếp.
 
 ### 4.1.2. Đặt Bàn Trực Tuyến 3 Bước (`FR-UNREG-02`)
-- **Bước 01 - Thời Gian & Bàn**: Chọn ngày (không nhận ngày quá khứ theo múi giờ Việt Nam), khung giờ Trưa (`11:00–13:30`) / Tối (`17:00–21:00`), số khách và chọn bàn phù hợp (hỗ trợ ghép bàn cho đoàn đông) dựa trên `GET /api/tables/availability`.
-- **Bước 02 - Chọn Món Trước**: Chọn món lẻ từ thực đơn 5 danh mục (`appetizer`, `main`, `seafood`, `dessert`, `beverage`), chọn độ chín thịt nếu `meatDonenessRequired`, xem gợi ý rượu vang ghép đôi hoặc chọn bộ **Tasting Course** theo số người.
+- **Bước 01 - Thời Gian & Bàn**: Chọn ngày hợp lệ theo lịch dương (từ chối ngày quá khứ và ngày không tồn tại như `30/02/2027`), khung giờ Trưa (`11:00–13:30`) / Tối (`17:00–21:00`) hoặc giờ tùy chọn trong khung giờ mở cửa **`10:00 – 22:30`**, số khách (`1–30`) và chọn bàn đơn hoặc **ghép bàn** (`selectedMergedTableIds` / `tableIds`) dựa trên `GET /api/tables/availability`.
+- **Bước 02 - Chọn Món Trước**: Chọn món lẻ từ thực đơn 5 danh mục (`appetizer`, `main`, `seafood`, `dessert`, `beverage`), chọn độ chín thịt nếu `meatDonenessRequired`, xem gợi ý rượu vang ghép đôi hoặc chọn bộ **Tasting Course** theo số người. Mọi món gửi lên server phải tồn tại trong `MENU_ITEMS` và còn phục vụ (`400 INVALID_MENU_ITEM`).
 - **Bước 03 - Xác Nhận & Email (`BookingConfirmation`)**:
-  - Nhập Họ tên, SĐT hợp lệ (regex SĐT Việt Nam `/^(?:\+84|0)[0-9]{8,10}$/`), Email hợp lệ, dịp đặc biệt và yêu cầu đặc biệt.
-  - **Kiểm soát chặt chẽ Mã Ưu Đãi (Voucher)**: Khách chưa đăng nhập chỉ được áp dụng các mã công khai thỏa mãn `minOrder` (như `LEGOURMET10`, `SWEETWINE`). Các mã có `tierRequired` (như `MEMBERVIP` yêu cầu hạng `Vàng` trở lên) bị chặn ở cả giao diện và `server.ts` — server tự kiểm tra lại `userId` và `membershipTier`, bỏ qua giảm giá nếu không hợp lệ.
+  - Nhập Họ tên (2–100 ký tự), SĐT hợp lệ (regex SĐT Việt Nam `/^(?:\+84|0)[0-9]{8,10}$/`), Email (**tùy chọn**; kiểm tra đúng định dạng nếu có nhập), dịp đặc biệt và yêu cầu đặc biệt.
+  - **Kiểm soát chặt chẽ Mã Ưu Đãi (Voucher)**: Kiểm tra tồn tại, **hạn sử dụng** (`isVoucherExpired` — từ chối mã đã quá hạn như `SWEETWINE` hết hạn `30/06/2026` với `400 VOUCHER_EXPIRED`), giá trị đơn tối thiểu (`400 VOUCHER_MIN_ORDER`) và điều kiện hạng thành viên (`403 VOUCHER_TIER_REQUIRED` nếu dùng `MEMBERVIP` khi chưa đăng nhập hoặc dưới hạng `Vàng`).
+  - **Tiêu điểm thưởng**: Chỉ cho phép khi đã đăng nhập có JWT hợp lệ khớp `userId` (`401 AUTH_REQUIRED` / `403 ACCESS_DENIED`).
   - Tùy chọn Đặt cọc giữ bàn ưu tiên (20% làm tròn theo 10.000đ, hoặc 200.000đ nếu chưa chọn món trước) hoặc Giữ chỗ không cần cọc (giữ tối đa 15 phút).
-  - Nút hành động chính hiển thị chuẩn ngữ nghĩa: **"Xác Nhận Đặt Bàn & Gửi Email Tự Động"**.
-  - Sau khi hoàn tất đặt bàn, hệ thống trả về `201 Created`, hiển thị phiếu Check-in điện tử (`CheckInBill`), đồng thời giữ nguyên trạng thái phiên người dùng (nếu đang đăng nhập thì **không** bị đăng xuất về khách vãng lai).
+  - Nút hành động chính hiển thị chuẩn ngữ nghĩa: **"Hoàn Tất Gửi Yêu Cầu Đặt Bàn"**.
+  - Khi server trả lỗi nghiệp vụ (`400`, `401`, `403`, `404`, `409`), giao diện **hiển thị trực tiếp thông báo lỗi** trên bước 3 để khách chỉnh sửa, **tuyệt đối không** lưu đơn giả cục bộ (`BK-xxxx`).
+  - Sau khi hoàn tất đặt bàn, hệ thống trả về `201 Created` (`status: 'pending'`, sinh mã duy nhất `LGB-XXXXX`), hiển thị phiếu Check-in điện tử (`CheckInBill`), đồng thời giữ nguyên trạng thái phiên người dùng.
 
 ### 4.1.3. Khách Hàng Tự Hủy Đặt Bàn Trực Tuyến (`FR-UNREG-03`)
 - **Điểm truy cập**: Nút **"Hủy Đặt Bàn"** xuất hiện trên `CheckInBill`, `LookupModal`, và thẻ đơn trong `UserProfileModal` đối với các đơn có trạng thái `pending` hoặc `confirmed`.
 - **Đánh giá điều kiện theo Chính sách 120 phút (`checkCancellationEligibility`)**:
   - Tính chính xác số phút còn lại từ thời điểm hiện tại (`Asia/Ho_Chi_Minh`) tới `bookingDate` + `arrivalTime`.
-  - **Trường hợp hợp lệ (còn ≥ 120 phút)**: Cho phép chọn 1 trong 6 lý do chuẩn (hoặc nhập ghi chú tùy chỉnh) và gửi `POST /api/reservations/:id/cancel` kèm `customerPhone` xác thực.
+  - **Trường hợp hợp lệ (còn ≥ 120 phút)**: Cho phép chọn 1 trong 6 lý do chuẩn (hoặc nhập ghi chú tùy chỉnh) và gửi `POST /api/reservations/:id/cancel` **bắt buộc kèm `customerPhone` khớp với đơn** (`400 PHONE_REQUIRED` nếu thiếu, `403 PHONE_MISMATCH` nếu sai; chỉ Staff/Admin có JWT hợp lệ được miễn).
   - **Hệ quả xử lý khi hủy thành công**:
     1. Chuyển trạng thái đơn sang `cancelled`, lưu `cancellationReason`, `cancellationNotes`, `cancelledAt`.
-    2. Giải phóng bàn ngay lập tức về `available` (xóa `currentReservationId`).
+    2. Giải phóng toàn bộ bàn thuộc đơn (cả bàn chính và bàn ghép trong `table_ids`) ngay lập tức về `available` (xóa `currentReservationId`).
     3. Ghi nhận và gửi email xác nhận hủy (`type: 'cancellation'`).
     4. Nếu đơn có tiền cọc (`depositAmount > 0`): hiển thị cam kết hoàn 100% tiền cọc trong vòng 24 giờ làm việc.
     5. Nếu đơn có quy đổi điểm (`pointsRedeemed > 0`): tự động hoàn lại toàn bộ số điểm đã dùng vào ví thành viên và ghi nhận dòng `refund` vào Sổ cái điểm thưởng.
@@ -514,9 +519,9 @@ Bên cạnh 4 bảng lõi trên PostgreSQL, hệ thống duy trì các mô hình
 ## 4.2. Member (Khách hàng thành viên)
 
 ### 4.2.1. Xác thực & Duy trì Phiên Đăng Nhập (`FR-MEM-01`)
-- Đăng ký tại `POST /api/users` (kiểm tra trùng email `409 EMAIL_EXISTS`, mật khẩu ≥ 6 ký tự, mặc định `role = 'customer'` không cho phép client tự nâng quyền).
-- Đăng nhập tại `POST /api/auth/login` (so sánh mật khẩu Bcrypt, trả về JWT ký bởi `JWT_SECRET` hạn 7 ngày + thông tin user), lưu `saveCurrentUser` + token vào `localStorage` và giữ ổn định xuyên suốt quá trình đặt bàn.
-- Cập nhật hồ sơ (`PATCH /api/users/:id`) chỉ cho phép tự sửa thông tin cá nhân của chính mình hoặc Admin sửa; chặn IDOR (`403`) và chặn tự đổi `role`.
+- Đăng ký tại `POST /api/users`: Họ tên dài **2–100 ký tự** (`400 INVALID_NAME`), kiểm tra định dạng email/SĐT VN, mật khẩu ≥ 6 ký tự, chặn trùng Email (`409 EMAIL_ALREADY_EXISTS`) và trùng Số điện thoại (`409 PHONE_ALREADY_EXISTS`), đồng thời khóa cứng từ server `role = 'customer'`, `membershipTier = 'Đồng'`, `loyaltyPoints = 0` (bỏ qua mọi giá trị điểm/hạng client gửi kèm).
+- Đăng nhập tại `POST /api/auth/login`: So sánh mật khẩu Bcrypt, trả thông báo `401` thống nhất khi sai tài khoản hoặc sai mật khẩu (tránh lộ tài khoản tồn tại), trả về JWT ký bởi `JWT_SECRET` **hạn 24 giờ**, lưu `saveCurrentUser` + token vào `localStorage` và giữ ổn định xuyên suốt quá trình đặt bàn.
+- Cập nhật hồ sơ (`PATCH /api/users/:id`): Chỉ cho phép tự sửa thông tin cá nhân của chính mình hoặc Admin sửa; chặn IDOR (`403`) và chặn tự đổi `role`, `loyaltyPoints`, `membershipTier`.
 
 ### 4.2.2. Hệ Thống Tích Điểm, Đổi Điểm & Sổ Cái Điểm Thưởng (`FR-MEM-02`)
 1. **Phân hạng Thành viên 4 cấp (`calculateTierFromPoints`)**:
@@ -536,7 +541,7 @@ Bên cạnh 4 bảng lõi trên PostgreSQL, hệ thống duy trì các mô hình
      - Khi đơn được tạo thành công, số điểm quy đổi (`pointsRedeemed`) được **trừ ngay lập tức** khỏi ví thành viên và ghi dòng `type: 'redeem'` (số âm) vào Sổ cái.
      - Nếu đơn bị hủy (`POST /api/reservations/:id/cancel` hoặc staff hủy đơn), số điểm đã dùng được **tự động hoàn 100%** kèm dòng `type: 'refund'` vào Sổ cái.
 4. **Sổ Cái Biến Động Điểm Thưởng (`Points Ledger`)**:
-   - Hiển thị trong tab Ưu Đãi của `UserProfileModal`, kết hợp dữ liệu cục bộ và API `GET /api/users/:id/points-ledger`, hiển thị rõ loại giao dịch (`Tích điểm`, `Đổi điểm`, `Hoàn điểm`, `Thưởng`), mô tả, mã đơn liên quan, thời gian và số dư sau giao dịch (`balanceAfter`).
+   - Hiển thị trong tab Ưu Đãi của `UserProfileModal`, kết hợp dữ liệu cục bộ và API `GET /api/users/:id/points-ledger` (**bắt buộc JWT token** của chính chủ `id` hoặc `admin`, từ chối `401`/`403` nếu truy cập trái phép), hiển thị rõ loại giao dịch (`Tích điểm`, `Đổi điểm`, `Hoàn điểm`, `Thưởng`), mô tả, mã đơn liên quan, thời gian và số dư sau giao dịch (`balanceAfter`).
 
 ---
 
@@ -551,10 +556,10 @@ Bên cạnh 4 bảng lõi trên PostgreSQL, hệ thống duy trì các mô hình
 
 ## 4.4. System (Tác tử Hệ thống tự động)
 
-- **Conflict Detection Engine & Slot Mutex (`FR-SYS-01`)**: Khóa tuần tự theo cặp `tableId:bookingDate` để loại bỏ race condition; từ chối mọi yêu cầu trùng bàn có `|arrival_1 - arrival_2| < 120 phút` (HTTP `409 CONFLICT`), trừ các đơn đã `cancelled`.
-- **Server-Side Integrity (`FR-SYS-02`)**: Tính toán lại toàn bộ giá món theo bảng giá chuẩn `MENU_ITEMS` tại server, kiểm tra điều kiện hạng voucher, kiểm tra trần giảm điểm 30%, và gán trạng thái mặc định `pending` cho đơn đặt trực tuyến.
+- **Conflict Detection Engine & Multi-Table Slot Mutex (`FR-SYS-01`)**: Khóa tuần tự theo thứ tự định danh trên toàn bộ cặp `tableId:bookingDate` của cả bàn chính và các bàn ghép (`tableIds`) để loại bỏ race condition/deadlock; lưu danh sách `table_ids` vào PostgreSQL; từ chối mọi yêu cầu trùng bất kỳ bàn nào có `|arrival_1 - arrival_2| < 120 phút` (HTTP `409 TABLE_SLOT_CONFLICT`), trừ các đơn đã `cancelled`.
+- **Server-Side Integrity (`FR-SYS-02`)**: Kiểm tra ngày lịch dương hợp lệ (`isValidCalendarDate`), giờ mở cửa `10:00–22:30`, từ chối món không thuộc `MENU_ITEMS` hoặc ngừng bán (`400 INVALID_MENU_ITEM`), kiểm tra hạn sử dụng/đơn tối thiểu/hạng voucher, kiểm tra tính duy nhất của `bookingCode` (`409 DUPLICATE_BOOKING_CODE`), bắt buộc JWT khi tiêu điểm, kiểm tra trần giảm điểm 30%, và ép trạng thái ban đầu `pending` cho đơn đặt trực tuyến.
 - **Rate Limiting (`FR-SYS-03`)**:
-  - `POST /api/auth/login`: Tối đa 5 lần / 15 phút (môi trường thực tế).
+  - `POST /api/auth/login`: Tối đa **5 lần đăng nhập thất bại / 15 phút** (`skipSuccessfulRequests: true` — không giới hạn các lần đăng nhập thành công).
   - `POST /api/reservations`: Tối đa 30 requests / phút.
   - General API: Tối đa 5.000 requests / 15 phút (miễn trừ localhost cho phát triển).
 - **Sandbox Cleanup (`FR-SYS-04`)**: `POST /api/test/reset-sandbox` dọn các đơn có đánh dấu kiểm thử (`[TEST]`, SĐT `0900000...`/`0999999...`, email `autotest`, mã `TEST-`) và đưa bàn liên quan về `available`.
@@ -600,12 +605,13 @@ Bên cạnh 4 bảng lõi trên PostgreSQL, hệ thống duy trì các mô hình
   - `POST /api/reservations/lookup` — Tra cứu đơn theo SĐT hoặc Booking Code.
   - `PATCH /api/reservations/:id/status` — Chuyển trạng thái đơn theo FSM & cộng điểm khi `completed` (`admin`, `staff`).
   - `POST /api/reservations/:id/cancel` — Khách tự hủy bàn theo chính sách 120 phút, giải phóng bàn & hoàn điểm.
-  - `GET /api/users/:id/points-ledger` — Lấy sổ cái biến động điểm của thành viên.
+  - `GET /api/users/:id/points-ledger` — Lấy sổ cái biến động điểm của thành viên (bắt buộc JWT chính chủ hoặc `admin`).
   - `GET /api/users` — Lấy danh sách toàn bộ tài khoản (`admin` only).
-  - `POST /api/users` — Đăng ký tài khoản thành viên mới.
+  - `POST /api/users` — Đăng ký tài khoản thành viên mới (chặn trùng email/SĐT, tên 2–100 ký tự, khóa mặc định `Đồng`/0 điểm).
   - `PATCH /api/users/:id` — Cập nhật hồ sơ cá nhân (chính chủ hoặc `admin`).
   - `GET /api/email-logs` — Xem nhật ký email đã gửi (`admin`, `staff`).
   - `POST /api/email-logs` — Ghi nhận log email mới.
+  - `DELETE /api/email-logs/:id` & `DELETE /api/email-logs` — Xóa log email (`admin`, `staff`).
   - `POST /api/test/reset-sandbox` — Dọn dẹp dữ liệu kiểm thử giả lập (`[TEST]`, `TEST-`).
 
 ---
@@ -618,10 +624,10 @@ Bên cạnh 4 bảng lõi trên PostgreSQL, hệ thống duy trì các mô hình
 | :--- | :---: | :---: | :---: | :---: |
 | Xem thực đơn & Bàn trống | ✅ Có | ✅ Có | ✅ Có | ✅ Có |
 | Đặt bàn trực tuyến & QR tại bàn | ✅ Có | ✅ Có | ✅ Có | ✅ Có |
-| Tra cứu & Tự hủy đặt bàn (≥ 120 phút) | ✅ Có | ✅ Có | ✅ Có | ✅ Có |
-| Áp dụng Voucher công khai (`LEGOURMET10`, `SWEETWINE`) | ✅ Có | ✅ Có | ✅ Có | ✅ Có |
+| Tra cứu & Tự hủy đặt bàn (≥ 120 phút, kèm SĐT) | ✅ Có | ✅ Có | ✅ Có | ✅ Có |
+| Áp dụng Voucher công khai còn hạn (`LEGOURMET10`) | ✅ Có | ✅ Có | ✅ Có | ✅ Có |
 | Áp dụng Voucher VIP (`MEMBERVIP` - Hạng Vàng+) | ❌ Chặn | ✅ Nếu đủ hạng | ❌ Không | ✅ Nếu đủ hạng |
-| Đổi điểm trừ tiền & Xem Sổ cái điểm | ❌ Không | ✅ Có | ❌ Không | ✅ Có |
+| Đổi điểm trừ tiền & Xem Sổ cái điểm | ❌ Không | ✅ Có (Chính chủ) | ❌ Không | ✅ Có |
 | Nhận điểm tích lũy sau khi đơn `completed` | ❌ Không | ✅ Có | ❌ Không | ✅ Có |
 | Bàn điều hành tiếp tân, Sơ đồ bàn, Duyệt/Chuyển đơn | ❌ Không | ❌ Không | ✅ Có | ✅ Có |
 | Màn hình Bếp (KDS), Kho BOM & Phản hồi CSAT | ❌ Không | ❌ Không | ✅ Có | ✅ Có |
@@ -635,12 +641,12 @@ Bên cạnh 4 bảng lõi trên PostgreSQL, hệ thống duy trì các mô hình
 | :--- | :--- | :--- |
 | **200 OK** | Thành công | Truy vấn, cập nhật trạng thái, hủy bàn hoặc lấy sổ cái điểm thành công. |
 | **201 Created** | Tạo mới thành công | Tạo đơn đặt bàn (`bookingCode: LGB-XXXXX`) hoặc đăng ký tài khoản thành công. |
-| **400 Bad Request** | `INVALID_STATUS_VALUE`, `INVALID_STATUS_TRANSITION`, `CANCELLATION_DEADLINE_EXCEEDED`, `ALREADY_CANCELLED`, `INVALID_STATUS_FOR_CANCELLATION` | Sai định dạng SĐT/email/ngày/giờ, đặt giờ quá khứ, chuyển trạng thái sai FSM hoặc tự hủy sát giờ dưới 120 phút. |
-| **401 Unauthorized** | `MISSING_TOKEN`, `INVALID_TOKEN` | Chưa đăng nhập hoặc JWT token hết hạn/không hợp lệ. |
-| **403 Forbidden** | `INSUFFICIENT_PERMISSIONS`, `PHONE_MISMATCH` | Staff/Customer truy cập API Admin, sửa tài khoản khác (IDOR), hoặc SĐT xác nhận hủy không khớp. |
-| **404 Not Found** | `RESERVATION_NOT_FOUND`, `TABLE_NOT_FOUND` | Không tìm thấy đơn đặt bàn hoặc mã bàn ăn. |
-| **409 Conflict** | `SLOT_CONFLICT`, `EMAIL_EXISTS` | Bàn đã có khách đặt trong cửa sổ 120 phút hoặc email đăng ký đã tồn tại. |
-| **429 Too Many Requests** | `AUTH_RATE_LIMIT`, `RESERVATION_RATE_LIMIT`, `RATE_LIMIT_EXCEEDED` | Vượt quá giới hạn số lần thử đăng nhập hoặc đặt bàn liên tục. |
+| **400 Bad Request** | `INVALID_BOOKING_DATE`, `PAST_BOOKING_DATE`, `OUT_OF_OPERATING_HOURS`, `INVALID_MENU_ITEM`, `INVALID_VOUCHER`, `VOUCHER_EXPIRED`, `VOUCHER_MIN_ORDER`, `INVALID_TABLE_STATUS`, `INVALID_STATUS_VALUE`, `INVALID_STATUS_TRANSITION`, `CANCELLATION_DEADLINE_EXCEEDED`, `ALREADY_CANCELLED`, `INVALID_STATUS_FOR_CANCELLATION`, `PHONE_REQUIRED`, `INVALID_NAME` | Ngày không tồn tại (`30/02/2027`), giờ ngoài `10:00–22:30`, món không có trong thực đơn, voucher hết hạn (`SWEETWINE`), trạng thái bàn không hợp lệ, chuyển trạng thái sai FSM, thiếu SĐT khi tự hủy, hoặc tên đăng ký ngoài `2–100` ký tự. |
+| **401 Unauthorized** | `AUTH_REQUIRED`, đăng nhập thất bại | Thiếu JWT token trong header `Authorization` khi gọi API bảo vệ (hoặc tiêu điểm), hoặc sai tài khoản/mật khẩu đăng nhập. |
+| **403 Forbidden** | `TOKEN_INVALID`, `ACCESS_DENIED`, `VOUCHER_TIER_REQUIRED`, `PHONE_MISMATCH` | JWT token sai chữ ký hoặc đã hết hạn (24h), truy cập trái vai trò RBAC/IDOR (xem sổ cái điểm người khác, tiêu điểm hộ), dùng voucher VIP không đủ hạng, hoặc SĐT hủy đơn không khớp. |
+| **404 Not Found** | `RESERVATION_NOT_FOUND`, `TABLE_NOT_FOUND` | Không tìm thấy đơn đặt bàn hoặc mã bàn ăn (bao gồm bàn ghép). |
+| **409 Conflict** | `TABLE_SLOT_CONFLICT`, `DUPLICATE_BOOKING_CODE`, `EMAIL_ALREADY_EXISTS`, `PHONE_ALREADY_EXISTS` | Bàn chính hoặc bàn ghép đã có khách đặt trong cửa sổ 120 phút, mã đặt bàn trùng lặp, hoặc Email/SĐT đăng ký đã tồn tại. |
+| **429 Too Many Requests** | `AUTH_RATE_LIMIT`, `RESERVATION_RATE_LIMIT`, `RATE_LIMIT_EXCEEDED` | Vượt quá 5 lần đăng nhập thất bại / 15 phút hoặc spam đặt bàn liên tục. |
 | **500 Server Error** | Lỗi xử lý nội bộ | Lỗi hệ thống bất thường phía server. |
 
 ---

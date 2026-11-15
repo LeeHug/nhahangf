@@ -7,7 +7,7 @@ export const users = pgTable('users', {
   email: text('email').notNull(),
   name: text('name').notNull(),
   phone: text('phone').notNull(),
-  membershipTier: text('membership_tier').notNull().default('Bạc'), // 'Bạc' | 'Vàng' | 'Kim Cương'
+  membershipTier: text('membership_tier').notNull().default('Đồng'), // 'Đồng' | 'Bạc' | 'Vàng' | 'Kim Cương'
   loyaltyPoints: integer('loyalty_points').notNull().default(0),
   avatar: text('avatar'),
   favoriteDishIds: jsonb('favorite_dish_ids').$type<string[]>().default([]),
@@ -39,6 +39,7 @@ export const reservations = pgTable('reservations', {
   bookingDate: text('booking_date').notNull(), // YYYY-MM-DD
   arrivalTime: text('arrival_time').notNull(), // HH:MM
   tableId: text('table_id').notNull(),
+  tableIds: jsonb('table_ids').$type<string[]>().default([]),
   tableName: text('table_name').notNull(),
   tableArea: text('table_area').notNull(),
   selectedDishes: jsonb('selected_dishes').notNull().default([]), // array of SelectedDishItem

@@ -25,13 +25,14 @@ import { SelectedDishItem, RestaurantTable, Reservation, UserAccount, UserVouche
 import { INITIAL_VOUCHERS } from '../../data/mockData';
 import { formatVND, downloadIcsCalendar } from '../../services/storage';
 import { CheckInBill } from './CheckInBill';
-import { isTimeSlotInPast } from '../../utils/dateTimeUtils';
+import { isTimeSlotInPast, isVoucherExpired, isValidCalendarDate, isWithinOperatingHours } from '../../utils/dateTimeUtils';
 
 interface BookingConfirmationProps {
   selectedDate: string;
   selectedTime: string;
   guestCount: number;
   table: RestaurantTable | undefined;
+  mergedTables?: RestaurantTable[];
   selectedDishes: SelectedDishItem[];
   selectedOccasion?: string;
   currentUser?: UserAccount | null;
@@ -58,6 +59,7 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
   selectedTime,
   guestCount,
   table,
+  mergedTables = [],
   selectedDishes,
   selectedOccasion,
   currentUser,
@@ -101,6 +103,7 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
   const [submittingStepText, setSubmittingStepText] = useState('');
   const [completedReservation, setCompletedReservation] = useState<Reservation | null>(null);
   const [timeValidationError, setTimeValidationError] = useState('');
+  const [submitError, setSubmitError] = useState('');
 
   const preOrderTotal = selectedDishes.reduce((sum, item) => sum + item.dish.price * item.quantity, 0);
 
@@ -138,7 +141,12 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
     const target = voucherToApply || INITIAL_VOUCHERS.find(v => (v.code || '').toUpperCase() === inputCode);
     
     if (!target) {
-      setVoucherError('Mã ưu đãi không hợp lệ hoặc đã hết hạn!');
+      setVoucherError('Mã ưu đãi không hợp lệ hoặc không tồn tại!');
+      return;
+    }
+
+    if (isVoucherExpired(target.expiryDate)) {
+      setVoucherError(`Mã ưu đãi "${target.code}" đã hết hạn sử dụng (${target.expiryDate})!`);
       return;
     }
 
@@ -183,7 +191,18 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTimeValidationError('');
-    if (!customerName || !customerPhone || !customerEmail) return;
+    setSubmitError('');
+    if (!customerName.trim() || !customerPhone.trim()) return;
+
+    if (!isValidCalendarDate(selectedDate)) {
+      setTimeValidationError(`Ngày đặt bàn (${selectedDate}) không hợp lệ hoặc không tồn tại trên lịch dương. Vui lòng quay lại Bước 1!`);
+      return;
+    }
+
+    if (!isWithinOperatingHours(selectedTime)) {
+      setTimeValidationError(`Giờ đến (${selectedTime}) nằm ngoài khung giờ phục vụ (10:00 - 22:30). Vui lòng quay lại Bước 1!`);
+      return;
+    }
 
     if (isTimeSlotInPast(selectedTime, selectedDate, 0)) {
       setTimeValidationError(
@@ -198,17 +217,17 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
     setTimeout(() => {
       setSubmittingStepText(
         currentUser
-          ? 'Đang tích lũy điểm thưởng & kích hoạt gửi email...'
-          : 'Đang khởi tạo mã đặt bàn & kích hoạt gửi email...'
+          ? 'Đang tích lũy điểm thưởng & kiểm tra giữ bàn...'
+          : 'Đang khởi tạo mã đặt bàn & xác thực thông tin...'
       );
     }, 600);
 
     setTimeout(async () => {
       try {
         const res = await onSubmitBooking({
-          name: customerName,
-          phone: customerPhone,
-          email: customerEmail,
+          name: customerName.trim(),
+          phone: customerPhone.trim(),
+          email: customerEmail.trim(),
           specialRequests,
           depositAmount,
           userId: currentUser?.id,
@@ -218,6 +237,8 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
           pointsDiscount: pointsDiscount > 0 ? pointsDiscount : undefined,
         });
         setCompletedReservation(res);
+      } catch (err: any) {
+        setSubmitError(err?.message || 'Không thể hoàn tất đặt bàn. Vui lòng kiểm tra lại thông tin hoặc chọn bàn/giờ khác.');
       } finally {
         setIsSubmitting(false);
       }
@@ -241,13 +262,30 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
   // MAIN FORM
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
+      {submitError && (
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 flex items-start gap-2.5 animate-fade-in shadow-xs">
+          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div className="text-xs space-y-1 flex-1">
+            <p className="font-bold text-rose-900">Không Thể Hoàn Tất Đặt Bàn</p>
+            <p className="text-rose-800 leading-relaxed">{submitError}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onPrev}
+            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shrink-0 cursor-pointer"
+          >
+            Quay Lại Chỉnh Sửa
+          </button>
+        </div>
+      )}
+
       {timeValidationError && (
         <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in shadow-xs">
           <div className="flex items-start gap-2.5">
             <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
             <div className="text-xs">
               <p className="font-bold text-rose-900">{timeValidationError}</p>
-              <p className="text-rose-700 mt-0.5">Nhà hàng không nhận đặt bàn cho các khung giờ đã trôi qua trong quá khứ.</p>
+              <p className="text-rose-700 mt-0.5">Nhà hàng không nhận đặt bàn cho các khung giờ không hợp lệ.</p>
             </div>
           </div>
           <button
@@ -361,14 +399,13 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
 
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1.5">
-                    Email nhận xác nhận tự động *
+                    Email nhận vé điện tử (Tùy chọn)
                   </label>
                   <div className="relative">
                     <Mail className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
                       id="customer-email-input"
                       type="email"
-                      required
                       placeholder="email@example.com"
                       value={customerEmail}
                       onChange={(e) => setCustomerEmail(e.target.value)}
@@ -455,19 +492,28 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
                     {/* Fast Click Vouchers */}
                     <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px]">
                       <span className="text-stone-400">Mã gợi ý:</span>
-                      {INITIAL_VOUCHERS.map((v) => (
-                        <button
-                          key={v.code}
-                          type="button"
-                          onClick={() => handleApplyVoucher(v)}
-                          className="px-2 py-1 rounded-md bg-stone-100 hover:bg-amber-100 hover:text-amber-900 text-stone-700 border border-stone-200 font-mono text-[10px] font-bold transition-all inline-flex items-center gap-1"
-                        >
-                          <span>{v.code}</span>
-                          {v.tierRequired && (
-                            <span className="text-[9px] text-amber-700 font-normal">({v.tierRequired}+)</span>
-                          )}
-                        </button>
-                      ))}
+                      {INITIAL_VOUCHERS.map((v) => {
+                        const expired = isVoucherExpired(v.expiryDate);
+                        return (
+                          <button
+                            key={v.code}
+                            type="button"
+                            onClick={() => handleApplyVoucher(v)}
+                            className={`px-2 py-1 rounded-md border font-mono text-[10px] font-bold transition-all inline-flex items-center gap-1 ${
+                              expired
+                                ? 'bg-stone-100 text-stone-400 border-stone-200 line-through'
+                                : 'bg-stone-100 hover:bg-amber-100 hover:text-amber-900 text-stone-700 border-stone-200'
+                            }`}
+                          >
+                            <span>{v.code}</span>
+                            {expired ? (
+                              <span className="text-[9px] text-rose-500 font-normal no-underline">(Hết hạn)</span>
+                            ) : v.tierRequired ? (
+                              <span className="text-[9px] text-amber-700 font-normal">({v.tierRequired}+)</span>
+                            ) : null}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -632,7 +678,9 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
               <div className="flex items-center gap-2">
                 <Armchair className="w-4 h-4 text-amber-400 shrink-0" />
                 <span>Bàn & Khu vực:</span>
-                <strong className="text-stone-100 ml-auto">{table?.name || 'Chưa chọn'}</strong>
+                <strong className="text-stone-100 ml-auto text-right">
+                  {table ? [table.name, ...mergedTables.map(t => t.name)].join(' + ') : 'Chưa chọn'}
+                </strong>
               </div>
               <div className="flex items-center gap-2">
                 <Users className="w-4 h-4 text-amber-400 shrink-0" />
@@ -721,7 +769,7 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
               <button
                 type="submit"
                 id="btn-confirm-booking-final"
-                disabled={isSubmitting || !customerName || !customerPhone || !customerEmail}
+                disabled={isSubmitting || !customerName.trim() || !customerPhone.trim()}
                 className="w-full py-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-900/40 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-all"
               >
                 {isSubmitting ? (
