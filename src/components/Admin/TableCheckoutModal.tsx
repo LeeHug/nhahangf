@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import QRCode from 'qrcode';
 import { X, Check, Printer, QrCode, CreditCard, Banknote, ShieldCheck, Sparkles, Receipt } from 'lucide-react';
 import { Reservation, RestaurantTable } from '../../types';
 import { formatVND } from '../../services/storage';
@@ -26,14 +27,29 @@ export const TableCheckoutModal: React.FC<TableCheckoutModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'vietqr' | 'pos_card'>('cash');
   const [notes, setNotes] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [vietQrUrl, setVietQrUrl] = useState<string>('');
 
   // Financial calculations
   const dishesTotal = reservation.preOrderTotal || 0;
   const depositPaid = reservation.depositAmount || 0;
   const discount = reservation.discountAmount || 0;
-  const finalAmountToPay = Math.max(0, dishesTotal - discount - depositPaid);
+  const pointsDiscount = reservation.pointsDiscount || 0;
+  const totalBillAfterDiscounts = Math.max(0, dishesTotal - discount - pointsDiscount);
+  const finalAmountToPay = Math.max(0, totalBillAfterDiscounts - depositPaid);
 
-  const pointsToEarn = Math.floor(finalAmountToPay / 20000);
+  const pointsToEarn = Math.floor(totalBillAfterDiscounts / 10000);
+
+  useEffect(() => {
+    if (paymentMethod !== 'vietqr') return;
+    const qrPayload = `LE GOURMET BISTRO | VCB: 9903888999 | SO TIEN: ${finalAmountToPay} VND | ND: ${reservation.bookingCode} ${reservation.customerPhone}`;
+    QRCode.toDataURL(qrPayload, {
+      width: 140,
+      margin: 1,
+      color: { dark: '#1c1917', light: '#ffffff' },
+    })
+      .then((url) => setVietQrUrl(url))
+      .catch(() => setVietQrUrl(''));
+  }, [paymentMethod, finalAmountToPay, reservation.bookingCode, reservation.customerPhone]);
 
   const handleComplete = () => {
     setIsProcessing(true);
@@ -176,6 +192,13 @@ export const TableCheckoutModal: React.FC<TableCheckoutModalProps> = ({
               </div>
             )}
 
+            {pointsDiscount > 0 && (
+              <div className="flex items-center justify-between text-amber-300">
+                <span>Quy đổi điểm thành viên ({reservation.pointsRedeemed || Math.round(pointsDiscount / 100)} điểm):</span>
+                <span>-{formatVND(pointsDiscount)}</span>
+              </div>
+            )}
+
             {depositPaid > 0 && (
               <div className="flex items-center justify-between text-amber-400">
                 <span>Tiền cọc đã thanh toán trước:</span>
@@ -250,13 +273,20 @@ export const TableCheckoutModal: React.FC<TableCheckoutModalProps> = ({
             {/* VietQR Display if selected */}
             {paymentMethod === 'vietqr' && (
               <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-4 text-xs animate-fade-in">
-                <div className="w-16 h-16 bg-white p-1 rounded-xl shrink-0 flex items-center justify-center">
-                  <QrCode className="w-12 h-12 text-stone-900" />
+                <div className="w-20 h-20 bg-white p-1.5 rounded-xl shrink-0 flex items-center justify-center overflow-hidden">
+                  {vietQrUrl ? (
+                    <img src={vietQrUrl} alt={`VietQR #${reservation.bookingCode}`} className="w-full h-full object-contain" />
+                  ) : (
+                    <QrCode className="w-12 h-12 text-stone-900" />
+                  )}
                 </div>
                 <div>
                   <p className="font-bold text-amber-300">Quét Mã VietQR Chuyển Khoản Tức Thì</p>
                   <p className="text-stone-300 text-[11px] mt-0.5">
                     Ngân hàng: <strong>Vietcombank (VCB)</strong> • STK: <strong>9903888999</strong>
+                  </p>
+                  <p className="text-amber-200 text-[11px] mt-0.5 font-semibold">
+                    Số tiền cần chuyển: {formatVND(finalAmountToPay)}
                   </p>
                   <p className="text-stone-400 text-[10px] mt-0.5">
                     Nội dung: <strong>{reservation.bookingCode} {reservation.customerPhone}</strong>

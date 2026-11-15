@@ -1077,13 +1077,16 @@ export function addDishesToReservation(
 
   const newPreOrderTotal = existingDishes.reduce((sum, item) => sum + item.dish.price * item.quantity, 0);
   const discount = reservation.discountAmount || 0;
-  const newTotal = Math.max(0, newPreOrderTotal - discount);
+  const pointsDiscount = reservation.pointsDiscount || 0;
+  const newTotal = Math.max(0, newPreOrderTotal - discount - pointsDiscount);
+  const newPointsEarned = Math.floor(newTotal / 10000);
 
   const updatedReservation: Reservation = {
     ...reservation,
     selectedDishes: existingDishes,
     preOrderTotal: newPreOrderTotal,
     totalAmount: newTotal,
+    pointsEarned: newPointsEarned,
   };
 
   const updatedReservations = [...currentReservations];

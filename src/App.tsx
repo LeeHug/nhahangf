@@ -465,7 +465,8 @@ export default function App() {
     }
   };
 
-  const handleConfirmCheckout = (reservationId: string, paymentDetails: any) => {
+  const handleConfirmCheckout = async (reservationId: string, paymentDetails: any) => {
+    const prevReservation = reservations.find(r => r.id === reservationId);
     const { updatedReservation } = checkoutAndSettleReservation(reservationId, paymentDetails);
     if (updatedReservation) {
       setReservations(getStoredReservations());
@@ -475,6 +476,17 @@ export default function App() {
         'Thanh Toán Hoàn Tất',
         `Bàn #${updatedReservation.bookingCode} (${updatedReservation.tableName}) đã thanh toán thành công và chuyển sang dọn dẹp.`
       );
+
+      // Đồng bộ trạng thái hoàn tất lên Backend/PostgreSQL theo đúng Finite State Machine
+      const targetId = updatedReservation.bookingCode || reservationId;
+      const prevStatus = prevReservation?.status || 'seated';
+      if (prevStatus === 'pending') {
+        await apiService.updateReservationStatus(targetId, 'confirmed');
+        await apiService.updateReservationStatus(targetId, 'seated');
+      } else if (prevStatus === 'confirmed') {
+        await apiService.updateReservationStatus(targetId, 'seated');
+      }
+      await apiService.updateReservationStatus(targetId, 'completed');
     }
   };
 
