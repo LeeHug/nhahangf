@@ -53,6 +53,8 @@ export const reservations = pgTable('reservations', {
   emailConfirmationSent: boolean('email_confirmation_sent').default(true),
   emailSentAt: text('email_sent_at'),
   pointsEarned: integer('points_earned').default(0),
+  pointsRedeemed: integer('points_redeemed').default(0),
+  pointsDiscount: integer('points_discount').default(0),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

@@ -1,4 +1,4 @@
-import { MenuItem, RestaurantTable, Reservation, SentEmailLog, UserAccount, UserVoucher } from '../types';
+import { MenuItem, RestaurantTable, Reservation, SentEmailLog, UserAccount, UserVoucher, PointsTransaction } from '../types';
 import { EXPANDED_TABLES } from './expandedTables';
 
 export const MENU_ITEMS: MenuItem[] = [
@@ -649,3 +649,46 @@ export const INITIAL_VOUCHERS: UserVoucher[] = [
     expiryDate: '30/06/2026',
   },
 ];
+
+export const INITIAL_POINTS_TRANSACTIONS: PointsTransaction[] = [
+  {
+    id: 'pt-1',
+    userId: 'user-1',
+    amount: 150,
+    type: 'earn',
+    description: 'Thưởng hoàn tất bữa ăn tiệc sinh nhật #LGB-89211',
+    bookingCode: 'LGB-89211',
+    createdAt: '2025-02-14T20:45:00.000Z',
+    balanceAfter: 420,
+  },
+  {
+    id: 'pt-2',
+    userId: 'user-1',
+    amount: -50,
+    type: 'redeem',
+    description: 'Tiêu 50 điểm giảm 5.000đ khi đặt bàn #LGB-71029',
+    bookingCode: 'LGB-71029',
+    createdAt: '2025-01-20T19:30:00.000Z',
+    balanceAfter: 270,
+  },
+  {
+    id: 'pt-3',
+    userId: 'user-1',
+    amount: 320,
+    type: 'bonus',
+    description: 'Thưởng kích hoạt thành viên Vàng thân thiết',
+    createdAt: '2025-01-10T08:30:00.000Z',
+    balanceAfter: 320,
+  },
+  {
+    id: 'pt-4',
+    userId: 'user-2',
+    amount: 180,
+    type: 'earn',
+    description: 'Thưởng hoàn tất bữa ăn tối gia đình #LGB-45901',
+    bookingCode: 'LGB-45901',
+    createdAt: '2025-02-15T19:00:00.000Z',
+    balanceAfter: 180,
+  },
+];
+

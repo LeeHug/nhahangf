@@ -46,6 +46,8 @@ interface BookingConfirmationProps {
     userId?: string;
     voucherCode?: string;
     discountAmount?: number;
+    pointsRedeemed?: number;
+    pointsDiscount?: number;
   }) => Promise<Reservation>;
   onOpenEmailPreview: (reservation: Reservation) => void;
   onResetBooking: () => void;
@@ -79,6 +81,10 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
   const [appliedVoucher, setAppliedVoucher] = useState<UserVoucher | null>(null);
   const [voucherError, setVoucherError] = useState('');
 
+  // Points redemption state (Mục 1: Tiêu điểm trừ tiền)
+  const [usePoints, setUsePoints] = useState(false);
+  const [pointsInput, setPointsInput] = useState<number>(0);
+
   // Update fields when currentUser changes
   useEffect(() => {
     if (currentUser) {
@@ -110,9 +116,21 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
     discountAmount = Math.min(preOrderTotal, discountAmount);
   }
 
-  const finalTotal = Math.max(0, preOrderTotal - discountAmount);
+  // Points redemption calculation (1 điểm = 100đ, tối đa 30% giá trị còn lại)
+  const remainingAfterVoucher = Math.max(0, preOrderTotal - discountAmount);
+  const maxRedeemableByTotal = Math.floor((remainingAfterVoucher * 0.3) / 100);
+  const maxRedeemablePoints = currentUser
+    ? Math.max(0, Math.min(currentUser.loyaltyPoints || 0, maxRedeemableByTotal))
+    : 0;
+
+  const pointsRedeemed = usePoints && currentUser && maxRedeemablePoints > 0
+    ? Math.max(0, Math.min(pointsInput || maxRedeemablePoints, maxRedeemablePoints))
+    : 0;
+  const pointsDiscount = pointsRedeemed * 100;
+
+  const finalTotal = Math.max(0, remainingAfterVoucher - pointsDiscount);
   const depositAmount = depositOption === 'deposit' ? (finalTotal > 0 ? Math.round(finalTotal * 0.2 / 10000) * 10000 : 200000) : 0;
-  const estimatedPoints = Math.max(20, Math.floor(finalTotal / 10000));
+  const estimatedPoints = Math.floor(finalTotal / 10000);
 
   const handleApplyVoucher = (voucherToApply?: UserVoucher) => {
     setVoucherError('');
@@ -129,9 +147,25 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
       return;
     }
 
-    if (target.tierRequired && currentUser) {
-      if (target.tierRequired === 'Vàng' && currentUser.membershipTier === 'Bạc') {
-        setVoucherError('Mã này chỉ áp dụng cho thành viên hạng Vàng và Kim Cương!');
+    // Logic 1: Người dùng tự do / khách chưa đăng nhập không được áp dụng voucher yêu cầu hạng thành viên
+    if (target.tierRequired) {
+      if (!currentUser) {
+        setVoucherError(`Mã "${target.code}" là đặc quyền riêng dành cho thành viên (hạng ${target.tierRequired} trở lên). Quý khách vui lòng đăng nhập để áp dụng!`);
+        return;
+      }
+
+      const TIER_ORDER: Record<string, number> = {
+        'Đồng': 1,
+        'Bạc': 2,
+        'Vàng': 3,
+        'Kim Cương': 4,
+      };
+
+      const userRank = TIER_ORDER[currentUser.membershipTier] || 1;
+      const requiredRank = TIER_ORDER[target.tierRequired] || 1;
+
+      if (userRank < requiredRank) {
+        setVoucherError(`Mã "${target.code}" chỉ áp dụng cho thành viên hạng ${target.tierRequired} trở lên! (Hạng thành viên hiện tại của bạn: ${currentUser.membershipTier})`);
         return;
       }
     }
@@ -180,6 +214,8 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
           userId: currentUser?.id,
           voucherCode: appliedVoucher?.code,
           discountAmount: discountAmount > 0 ? discountAmount : undefined,
+          pointsRedeemed: pointsRedeemed > 0 ? pointsRedeemed : undefined,
+          pointsDiscount: pointsDiscount > 0 ? pointsDiscount : undefined,
         });
         setCompletedReservation(res);
       } finally {
@@ -424,15 +460,101 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
                           key={v.code}
                           type="button"
                           onClick={() => handleApplyVoucher(v)}
-                          className="px-2 py-1 rounded-md bg-stone-100 hover:bg-amber-100 hover:text-amber-900 text-stone-700 border border-stone-200 font-mono text-[10px] font-bold transition-all"
+                          className="px-2 py-1 rounded-md bg-stone-100 hover:bg-amber-100 hover:text-amber-900 text-stone-700 border border-stone-200 font-mono text-[10px] font-bold transition-all inline-flex items-center gap-1"
                         >
-                          {v.code}
+                          <span>{v.code}</span>
+                          {v.tierRequired && (
+                            <span className="text-[9px] text-amber-700 font-normal">({v.tierRequired}+)</span>
+                          )}
                         </button>
                       ))}
                     </div>
                   </div>
                 )}
               </div>
+
+              {/* Points Redemption Section (Mục 1) */}
+              {currentUser && (
+                <div className="pt-3 border-t border-stone-100 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
+                      <Award className="w-4 h-4 text-amber-600" />
+                      <span>Sử Dụng Điểm Thành Viên (1 điểm = 100đ)</span>
+                    </label>
+                    <span className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                      Ví hiện có: {currentUser.loyaltyPoints || 0} điểm
+                    </span>
+                  </div>
+
+                  {preOrderTotal <= 0 ? (
+                    <p className="text-[11px] text-stone-500 italic">
+                      Quý khách cần chọn trước món ăn để sử dụng điểm tích lũy trừ trực tiếp vào hóa đơn.
+                    </p>
+                  ) : maxRedeemablePoints <= 0 ? (
+                    <p className="text-[11px] text-stone-500 italic">
+                      Quý khách chưa đủ điểm khả dụng để đổi thưởng cho đơn hàng này.
+                    </p>
+                  ) : (
+                    <div className={`p-3.5 rounded-xl border transition-all ${usePoints ? 'bg-amber-50/70 border-amber-400' : 'bg-stone-50 border-stone-200'}`}>
+                      <label className="flex items-center justify-between cursor-pointer gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <input
+                            type="checkbox"
+                            checked={usePoints}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setUsePoints(checked);
+                              if (checked) {
+                                setPointsInput(maxRedeemablePoints);
+                              }
+                            }}
+                            className="w-4 h-4 accent-amber-600 rounded cursor-pointer"
+                          />
+                          <div>
+                            <span className="text-xs font-bold text-stone-900 block">
+                              Dùng điểm trừ trực tiếp tối đa 30% hóa đơn
+                            </span>
+                            <span className="text-[11px] text-stone-500">
+                              Có thể dùng tối đa {maxRedeemablePoints} điểm (-{formatVND(maxRedeemablePoints * 100)})
+                            </span>
+                          </div>
+                        </div>
+                        {usePoints && pointsDiscount > 0 && (
+                          <span className="text-xs font-extrabold text-emerald-700 font-mono shrink-0">
+                            -{formatVND(pointsDiscount)}
+                          </span>
+                        )}
+                      </label>
+
+                      {usePoints && (
+                        <div className="mt-3 pt-2.5 border-t border-amber-200/70 flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+                          <div className="flex items-center gap-2 flex-1">
+                            <input
+                              type="range"
+                              min={1}
+                              max={maxRedeemablePoints}
+                              value={pointsRedeemed}
+                              onChange={(e) => setPointsInput(Number(e.target.value))}
+                              className="flex-1 accent-amber-600 cursor-pointer"
+                            />
+                            <input
+                              type="number"
+                              min={1}
+                              max={maxRedeemablePoints}
+                              value={pointsRedeemed}
+                              onChange={(e) => setPointsInput(Math.max(1, Math.min(maxRedeemablePoints, Number(e.target.value) || 0)))}
+                              className="w-20 px-2 py-1 rounded-lg border border-amber-300 bg-white text-xs font-mono font-bold text-stone-900 text-center"
+                            />
+                          </div>
+                          <span className="text-[11px] text-stone-600">
+                            Còn lại sau tiêu: <strong>{(currentUser.loyaltyPoints || 0) - pointsRedeemed} điểm</strong>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </section>
 
@@ -563,6 +685,13 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
                 </div>
               )}
 
+              {pointsRedeemed > 0 && pointsDiscount > 0 && (
+                <div className="flex justify-between text-emerald-400">
+                  <span>Tiêu điểm tích lũy ({pointsRedeemed} điểm):</span>
+                  <span className="font-bold">-{formatVND(pointsDiscount)}</span>
+                </div>
+              )}
+
               {depositAmount > 0 && (
                 <div className="flex justify-between text-amber-400">
                   <span>Tiền cọc giữ bàn (được trừ khi thanh toán):</span>
@@ -580,7 +709,7 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
                 <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-[11px] text-amber-300">
                   <span className="flex items-center gap-1 font-medium">
                     <Award className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Điểm tích lũy thành viên:</span>
+                    <span>Điểm dự kiến nhận sau dùng bữa:</span>
                   </span>
                   <strong className="font-bold text-amber-300">+{estimatedPoints} điểm</strong>
                 </div>
@@ -603,7 +732,7 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
                 ) : (
                   <>
                     <CheckCircle className="w-5 h-5 stroke-[2.5]" />
-                    <span>Xác Nhận Đặt Bàn & Gửi Email Tự Động</span>
+                    <span>Hoàn Tất Gửi Yêu Cầu Đặt Bàn</span>
                   </>
                 )}
               </button>

@@ -92,14 +92,33 @@ export interface Reservation {
   discountAmount?: number; // Tiền giảm giá voucher
   depositAmount: number; // Tiền cọc (nếu có)
   totalAmount: number;   // Tổng hóa đơn dự kiến
-  pointsEarned?: number; // Điểm tích lũy nhận được
+  pointsEarned?: number; // Điểm tích lũy nhận được sau khi hoàn tất
+  pointsRedeemed?: number; // Số điểm đã dùng để giảm giá
+  pointsDiscount?: number; // Số tiền được giảm tương ứng từ điểm (VND)
   status: ReservationStatus;
   specialRequests?: string;
   occasion?: string;     // Sinh nhật, Kỷ niệm, Tiếp khách, Ăn tối gia đình
   createdAt: string;     // ISO String
   emailConfirmationSent: boolean;
   emailSentAt?: string;
+  cancellationReason?: string;
+  cancellationNotes?: string;
+  cancelledAt?: string;
 }
+
+export type PointsTransactionType = 'earn' | 'redeem' | 'refund' | 'bonus';
+
+export interface PointsTransaction {
+  id: string;
+  userId: string;
+  amount: number; // Dương (+) khi cộng điểm, Âm (-) khi tiêu điểm
+  type: PointsTransactionType;
+  description: string;
+  bookingCode?: string;
+  createdAt: string;
+  balanceAfter: number;
+}
+
 
 export type UserRole = 'customer' | 'admin' | 'staff';
 export type MembershipTier = 'Đồng' | 'Bạc' | 'Vàng' | 'Kim Cương';

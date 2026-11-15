@@ -1,4 +1,4 @@
-import { Reservation, RestaurantTable, SentEmailLog, UserAccount } from '../types';
+import { Reservation, RestaurantTable, SentEmailLog, UserAccount, PointsTransaction } from '../types';
 
 const AUTH_TOKEN_KEY = 'restaurant_auth_jwt_token_v1';
 
@@ -49,6 +49,11 @@ export const apiService = {
       if (data.token) {
         saveStoredAuthToken(data.token);
       }
+      if (data.user) {
+        try {
+          localStorage.setItem('restaurant_current_user_v1', JSON.stringify(data.user));
+        } catch (e) {}
+      }
       return { success: true, token: data.token, user: data.user, message: data.message };
     } catch (e: any) {
       console.warn('Backend login unavailable, fallback error:', e);
@@ -68,6 +73,11 @@ export const apiService = {
         return null;
       }
       const data = await res.json();
+      if (data.user) {
+        try {
+          localStorage.setItem('restaurant_current_user_v1', JSON.stringify(data.user));
+        } catch (e) {}
+      }
       return data.user || null;
     } catch (e) {
       return null;
@@ -163,6 +173,42 @@ export const apiService = {
     }
   },
 
+  async cancelReservation(
+    idOrCode: string,
+    params: { reason: string; cancelNotes?: string; customerPhone?: string }
+  ): Promise<{ success: boolean; reservation?: Reservation; message: string; refundInfo?: any }> {
+    try {
+      const res = await fetch(`/api/reservations/${idOrCode}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify(params),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return {
+          success: false,
+          message: data.error || 'Không thể hủy đơn đặt bàn. Vui lòng kiểm tra lại điều kiện.',
+        };
+      }
+      return {
+        success: true,
+        reservation: data.reservation,
+        message: data.message,
+        refundInfo: data.refundInfo,
+      };
+    } catch (e: any) {
+      console.warn('Failed to call cancel reservation API', e);
+      return {
+        success: false,
+        message: 'Lỗi kết nối máy chủ khi thực hiện hủy đặt bàn.',
+      };
+    }
+  },
+
+
   // Users
   async getUsers(): Promise<UserAccount[]> {
     try {
@@ -189,6 +235,19 @@ export const apiService = {
     } catch (e) {
       console.warn('Failed to sync user to SQL', e);
       return null;
+    }
+  },
+
+  async getPointsLedger(userId: string): Promise<PointsTransaction[]> {
+    try {
+      const res = await fetch(`/api/users/${userId}/points-ledger`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error('API error');
+      return await res.json();
+    } catch (e) {
+      console.warn('Falling back to local storage for points ledger', e);
+      return [];
     }
   },
 

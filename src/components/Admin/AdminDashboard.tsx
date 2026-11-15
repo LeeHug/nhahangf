@@ -67,28 +67,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
   const isActualAdmin = currentUser?.role === 'admin';
   
-  // Simulated view mode toggle for testing (Admin can preview as Staff)
+  // viewMode chỉ cho phép chuyển đổi nếu người dùng thực sự là Admin. Nhân viên (Staff) bị khóa ở chế độ 'staff'.
   const [viewMode, setViewMode] = useState<'admin' | 'staff'>(
-    initialTab === 'staff' || initialTab === 'reports' || initialTab === 'menu' || initialTab === 'inventory'
-      ? 'admin'
-      : currentUser?.role === 'staff' ? 'staff' : 'admin'
+    isActualAdmin ? (initialTab === 'staff_ops' ? 'staff' : 'admin') : 'staff'
   );
 
   const [activeTab, setActiveTab] = useState<
     'staff_ops' | 'reservations' | 'tables' | 'kds' | 'inventory' | 'feedback' | 'reports' | 'menu' | 'staff'
-  >(initialTab || (currentUser?.role === 'staff' ? 'staff_ops' : 'reservations'));
+  >(() => {
+    if (!isActualAdmin) {
+      if (initialTab === 'staff' || initialTab === 'reports' || initialTab === 'menu') {
+        return 'staff_ops';
+      }
+      return initialTab || 'staff_ops';
+    }
+    return initialTab || 'reservations';
+  });
 
   // Sync initialTab if changed externally
   React.useEffect(() => {
     if (initialTab) {
+      if (!isActualAdmin && (initialTab === 'staff' || initialTab === 'reports' || initialTab === 'menu')) {
+        setActiveTab('staff_ops');
+        setViewMode('staff');
+        return;
+      }
       setActiveTab(initialTab);
-      if (initialTab === 'staff' || initialTab === 'reports' || initialTab === 'menu' || initialTab === 'inventory') {
+      if (isActualAdmin && (initialTab === 'staff' || initialTab === 'reports' || initialTab === 'menu' || initialTab === 'inventory')) {
         setViewMode('admin');
       }
     }
-  }, [initialTab]);
+  }, [initialTab, isActualAdmin]);
 
   const handleSelectTab = (tab: 'staff_ops' | 'reservations' | 'tables' | 'kds' | 'inventory' | 'feedback' | 'reports' | 'menu' | 'staff') => {
+    // Chặn nhân viên truy cập các tab đặc quyền admin
+    if (!isActualAdmin && (tab === 'staff' || tab === 'reports' || tab === 'menu')) {
+      setActiveTab('staff_ops');
+      if (onTabChange) onTabChange('staff_ops');
+      return;
+    }
     setActiveTab(tab);
     if (onTabChange) onTabChange(tab);
   };
@@ -130,7 +147,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const totalGuestsToday = todayReservations.reduce((sum, r) => sum + r.guestCount, 0);
 
   const isRestrictedForStaff = (tabName: string) => {
-    return viewMode === 'staff' && (tabName === 'reports' || tabName === 'menu' || tabName === 'staff');
+    return (!isActualAdmin || viewMode === 'staff') && (tabName === 'reports' || tabName === 'menu' || tabName === 'staff');
   };
 
   return (
@@ -169,64 +186,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {/* Quick Role View Switcher for easy testing */}
-            <div className="flex bg-stone-800 p-1 rounded-2xl border border-stone-700 text-xs">
+            {/* Quick Role View Switcher - Chỉ hiển thị cho Admin thực thụ */}
+            {isActualAdmin && (
+              <div className="flex bg-stone-800 p-1 rounded-2xl border border-stone-700 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('admin');
+                    if (activeTab === 'staff_ops') setActiveTab('reservations');
+                  }}
+                  className={`px-3 py-2 rounded-xl font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    viewMode === 'admin'
+                      ? 'bg-amber-600 text-stone-950 shadow-md'
+                      : 'text-stone-300 hover:text-white'
+                  }`}
+                  title="Xem giao diện với quyền Quản Trị Viên (Admin)"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Admin View</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('staff');
+                    setActiveTab('staff_ops');
+                  }}
+                  className={`px-3 py-2 rounded-xl font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    viewMode === 'staff'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-stone-300 hover:text-white'
+                  }`}
+                  title="Xem giao diện với quyền Nhân Viên (Staff Desk)"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Staff View</span>
+                </button>
+              </div>
+            )}
+
+            {/* Phím tắt Quản lý tài khoản - Chỉ Admin mới có quyền truy cập */}
+            {isActualAdmin && (
               <button
                 type="button"
+                id="admin-header-account-btn"
                 onClick={() => {
                   setViewMode('admin');
-                  if (activeTab === 'staff_ops') setActiveTab('reservations');
+                  handleSelectTab('staff');
                 }}
-                className={`px-3 py-2 rounded-xl font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                  viewMode === 'admin'
-                    ? 'bg-amber-600 text-stone-950 shadow-md'
-                    : 'text-stone-300 hover:text-white'
+                className={`px-3.5 py-2.5 rounded-2xl font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer shadow-md ${
+                  activeTab === 'staff'
+                    ? 'bg-amber-500 text-stone-950 ring-2 ring-amber-300'
+                    : 'bg-stone-800 hover:bg-stone-750 text-amber-300 border border-amber-500/40 hover:border-amber-400'
                 }`}
-                title="Xem giao diện với quyền Quản Trị Viên (Admin)"
+                title="Xem và quản lý tài khoản nhân viên, khách hàng và phân quyền RBAC"
               >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Admin View</span>
+                <Users className="w-4 h-4 text-amber-400" />
+                <span>Quản Lý Tài Khoản</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-extrabold">
+                  RBAC
+                </span>
               </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setViewMode('staff');
-                  setActiveTab('staff_ops');
-                }}
-                className={`px-3 py-2 rounded-xl font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                  viewMode === 'staff'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'text-stone-300 hover:text-white'
-                }`}
-                title="Xem giao diện với quyền Nhân Viên (Staff Desk)"
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>Staff View</span>
-              </button>
-            </div>
-
-            {/* Quick direct access to Account Management */}
-            <button
-              type="button"
-              id="admin-header-account-btn"
-              onClick={() => {
-                setViewMode('admin');
-                handleSelectTab('staff');
-              }}
-              className={`px-3.5 py-2.5 rounded-2xl font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer shadow-md ${
-                activeTab === 'staff'
-                  ? 'bg-amber-500 text-stone-950 ring-2 ring-amber-300'
-                  : 'bg-stone-800 hover:bg-stone-750 text-amber-300 border border-amber-500/40 hover:border-amber-400'
-              }`}
-              title="Xem và quản lý tài khoản nhân viên, khách hàng và phân quyền RBAC"
-            >
-              <Users className="w-4 h-4 text-amber-400" />
-              <span>Quản Lý Tài Khoản</span>
-              <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-extrabold">
-                RBAC
-              </span>
-            </button>
+            )}
 
             {onBackToBooking && (
               <button
@@ -458,29 +479,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {isRestrictedForStaff('menu') && <Lock className="w-3 h-3 text-stone-400" />}
         </button>
 
-        {/* Tab: Account & Staff Management (Admin Only) */}
-        <button
-          type="button"
-          id="admin-tab-staff-accounts-btn"
-          onClick={() => {
-            if (viewMode === 'staff') {
-              setViewMode('admin');
-            }
-            handleSelectTab('staff');
-          }}
-          className={`py-2.5 px-3.5 rounded-xl font-bold flex items-center gap-2 transition cursor-pointer border ${
-            activeTab === 'staff'
-              ? 'bg-amber-600 text-stone-950 border-amber-500 shadow-md ring-1 ring-amber-400'
-              : 'text-stone-800 bg-amber-500/10 hover:bg-amber-500/20 border-amber-400/50'
-          }`}
-          title="Module Quản Lý Toàn Bộ Tài Khoản & Phân Quyền RBAC"
-        >
-          <Users className="w-4 h-4 text-amber-700" />
-          <span className="font-extrabold text-stone-900">Quản Lý Tài Khoản</span>
-          <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-stone-950 text-[10px] font-black">
-            RBAC
-          </span>
-        </button>
+        {/* Tab: Account & Staff Management (Chỉ dành riêng cho Admin) */}
+        {isActualAdmin && (
+          <button
+            type="button"
+            id="admin-tab-staff-accounts-btn"
+            onClick={() => {
+              handleSelectTab('staff');
+            }}
+            className={`py-2.5 px-3.5 rounded-xl font-bold flex items-center gap-2 transition cursor-pointer border ${
+              activeTab === 'staff'
+                ? 'bg-amber-600 text-stone-950 border-amber-500 shadow-md ring-1 ring-amber-400'
+                : 'text-stone-800 bg-amber-500/10 hover:bg-amber-500/20 border-amber-400/50'
+            }`}
+            title="Module Quản Lý Toàn Bộ Tài Khoản & Phân Quyền RBAC"
+          >
+            <Users className="w-4 h-4 text-amber-700" />
+            <span className="font-extrabold text-stone-900">Quản Lý Tài Khoản</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-stone-950 text-[10px] font-black">
+              RBAC
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Role Restriction Banner if staff tries to open admin tabs */}
@@ -497,17 +517,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               Module Dành Riêng Cho Quản Trị Viên (Admin)
             </h3>
             <p className="text-xs text-stone-400 max-w-md mx-auto mt-2 leading-relaxed">
-              Bạn đang ở chế độ <strong>Nhân Viên (Staff)</strong>. Các báo cáo tài chính mật, quản lý thực đơn và phân quyền nhân sự chỉ được truy cập bởi tài khoản <strong>Quản Trị Viên (Admin)</strong>.
+              Bạn đang đăng nhập với vai trò <strong>Nhân Viên (Staff)</strong>. Các báo cáo tài chính mật, chỉnh sửa thực đơn giá cả và phân quyền nhân sự chỉ được quản lý bởi tài khoản <strong>Quản Trị Viên (Admin)</strong>.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setViewMode('admin')}
-            className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs inline-flex items-center gap-2 cursor-pointer shadow-lg"
-          >
-            <ShieldCheck className="w-4 h-4 stroke-[2.5]" />
-            <span>Chuyển Sang Chế Độ Admin Để Xem</span>
-          </button>
+          {isActualAdmin ? (
+            <button
+              type="button"
+              onClick={() => setViewMode('admin')}
+              className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs inline-flex items-center gap-2 cursor-pointer shadow-lg"
+            >
+              <ShieldCheck className="w-4 h-4 stroke-[2.5]" />
+              <span>Quay Lại Giao Diện Quản Trị Admin</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setActiveTab('staff_ops')}
+              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer shadow-lg"
+            >
+              <QrCode className="w-4 h-4 stroke-[2.5]" />
+              <span>Quay Về Bàn Điều Hành Tiếp Tân</span>
+            </button>
+          )}
         </div>
       ) : (
         /* Active Tab Content */

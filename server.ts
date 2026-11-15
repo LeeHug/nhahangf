@@ -5,16 +5,19 @@ import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { db } from './src/db/index.ts';
 import { tables, reservations, users, emailLogs } from './src/db/schema.ts';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { EXPANDED_TABLES } from './src/data/expandedTables.ts';
-import { INITIAL_RESERVATIONS, INITIAL_USERS, INITIAL_EMAIL_LOGS, MENU_ITEMS, INITIAL_VOUCHERS } from './src/data/mockData.ts';
-import { isTimeSlotInPast } from './src/utils/dateTimeUtils.ts';
+import { INITIAL_RESERVATIONS, INITIAL_USERS, INITIAL_EMAIL_LOGS, MENU_ITEMS, INITIAL_VOUCHERS, INITIAL_POINTS_TRANSACTIONS } from './src/data/mockData.ts';
+import { isTimeSlotInPast, checkCancellationEligibility } from './src/utils/dateTimeUtils.ts';
 import { generateToken, authenticateToken, requireRoles, AuthenticatedRequest } from './server-auth.ts';
+import { PointsTransaction } from './src/types.ts';
 
 let localTables = [...EXPANDED_TABLES];
 let localReservations = [...INITIAL_RESERVATIONS];
 let localUsers = [...INITIAL_USERS];
 let localEmailLogs = [...INITIAL_EMAIL_LOGS];
+let localPointsTransactions: PointsTransaction[] = [...INITIAL_POINTS_TRANSACTIONS];
+
 
 // In-memory / server-side password storage with secure bcrypt hashes
 const serverPasswordHashes: Record<string, string> = {};
@@ -108,14 +111,17 @@ async function acquireSlotLock(tableKey: string): Promise<() => void> {
 
 
 async function seedDatabaseIfEmpty() {
-  if (!process.env.SQL_HOST) {
-    console.log('ℹ️ [Database] Chế độ cục bộ: Chưa cấu hình SQL_HOST (sử dụng in-memory fallback cho local dev).');
+  if (!process.env.SQL_HOST && !process.env.DATABASE_URL) {
+    console.log('ℹ️ [Database] Chế độ cục bộ: Chưa cấu hình biến môi trường PostgreSQL (sử dụng in-memory fallback cho local dev). Xem hướng dẫn cấu hình trong file .env.example');
     return;
   }
   try {
+    console.log(`✅ [PostgreSQL] Đang kết nối tới cơ sở dữ liệu: ${process.env.DATABASE_URL ? 'DATABASE_URL' : `${process.env.SQL_USER}@${process.env.SQL_HOST}:${process.env.SQL_PORT || 5432}/${process.env.SQL_DB_NAME}`}`);
+    await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS points_redeemed integer DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS points_discount integer DEFAULT 0`);
     const existingTables = await db.select().from(tables);
     if (existingTables.length === 0) {
-      console.log('Seeding tables into Cloud SQL...');
+      console.log('🌱 [PostgreSQL] Đang khởi tạo dữ liệu danh mục bàn (tables)...');
       for (const t of EXPANDED_TABLES) {
         await db.insert(tables).values({
           id: t.id,
@@ -131,7 +137,7 @@ async function seedDatabaseIfEmpty() {
 
     const existingUsers = await db.select().from(users);
     if (existingUsers.length === 0) {
-      console.log('Seeding initial users into Cloud SQL...');
+      console.log('🌱 [PostgreSQL] Đang khởi tạo tài khoản ban đầu (users)...');
       for (const u of INITIAL_USERS) {
         await db.insert(users).values({
           id: u.id,
@@ -150,7 +156,7 @@ async function seedDatabaseIfEmpty() {
 
     const existingReservations = await db.select().from(reservations);
     if (existingReservations.length === 0) {
-      console.log('Seeding initial reservations into Cloud SQL...');
+      console.log('🌱 [PostgreSQL] Đang khởi tạo danh sách đặt bàn (reservations)...');
       for (const r of INITIAL_RESERVATIONS) {
         await db.insert(reservations).values({
           id: r.id,
@@ -184,7 +190,7 @@ async function seedDatabaseIfEmpty() {
 
     const existingEmails = await db.select().from(emailLogs);
     if (existingEmails.length === 0) {
-      console.log('Seeding initial email logs into Cloud SQL...');
+      console.log('🌱 [PostgreSQL] Đang khởi tạo nhật ký email (email_logs)...');
       for (const e of INITIAL_EMAIL_LOGS) {
         await db.insert(emailLogs).values({
           id: e.id,
@@ -199,9 +205,10 @@ async function seedDatabaseIfEmpty() {
         }).onConflictDoNothing();
       }
     }
+    console.log('✅ [PostgreSQL] Cơ sở dữ liệu PostgreSQL đã được kết nối và đồng bộ hoàn tất!');
   } catch (err: any) {
     if (err?.cause?.code === 'ECONNREFUSED' || err?.code === 'ECONNREFUSED') {
-      console.log('ℹ️ [Database] Chế độ cục bộ: Không kết nối được PostgreSQL (đang dùng fallback in-memory).');
+      console.log('ℹ️ [Database] Chế độ cục bộ: Không kết nối được cổng PostgreSQL (đang dùng fallback in-memory).');
     } else {
       console.warn('Seed notice:', err?.message || err);
     }
@@ -689,29 +696,45 @@ async function startServer() {
         };
       });
 
-      // 10. Tự kiểm tra và tính giảm giá Voucher tại Server
+      // 10. Tự kiểm tra và tính giảm giá Voucher tại Server (chặn khách vãng lai dùng voucher VIP)
       let verifiedDiscount = 0;
       const inputVoucher = newRes.voucherCode ? String(newRes.voucherCode).trim().toUpperCase() : null;
       if (inputVoucher) {
         const foundVoucher = INITIAL_VOUCHERS.find(v => v.code.toUpperCase() === inputVoucher);
         if (foundVoucher && verifiedPreOrderTotal >= foundVoucher.minOrder) {
-          if (foundVoucher.discountPercent) {
-            verifiedDiscount = Math.round((verifiedPreOrderTotal * foundVoucher.discountPercent) / 100);
-          } else if (foundVoucher.discountAmount) {
-            verifiedDiscount = foundVoucher.discountAmount;
+          let isEligible = true;
+
+          // Kiểm tra điều kiện hạng thành viên nếu voucher yêu cầu
+          if (foundVoucher.tierRequired) {
+            const bookingUserId = newRes.userId;
+            if (!bookingUserId) {
+              isEligible = false; // Người dùng tự do / vãng lai không được dùng voucher hạng VIP
+            } else {
+              const matchedUser = localUsers.find(u => u.id === bookingUserId);
+              const TIER_ORDER: Record<string, number> = {
+                'Đồng': 1,
+                'Bạc': 2,
+                'Vàng': 3,
+                'Kim Cương': 4,
+              };
+              const userRank = matchedUser ? (TIER_ORDER[matchedUser.membershipTier] || 1) : 0;
+              const reqRank = TIER_ORDER[foundVoucher.tierRequired] || 1;
+              if (userRank < reqRank) {
+                isEligible = false;
+              }
+            }
           }
-          verifiedDiscount = Math.min(verifiedPreOrderTotal, verifiedDiscount);
+
+          if (isEligible) {
+            if (foundVoucher.discountPercent) {
+              verifiedDiscount = Math.round((verifiedPreOrderTotal * foundVoucher.discountPercent) / 100);
+            } else if (foundVoucher.discountAmount) {
+              verifiedDiscount = foundVoucher.discountAmount;
+            }
+            verifiedDiscount = Math.min(verifiedPreOrderTotal, verifiedDiscount);
+          }
         }
       }
-
-      const verifiedFinalTotal = Math.max(0, verifiedPreOrderTotal - verifiedDiscount);
-      let verifiedDeposit = 0;
-      if (newRes.depositAmount > 0) {
-        verifiedDeposit = verifiedFinalTotal > 0 ? Math.round(verifiedFinalTotal * 0.2 / 10000) * 10000 : 200000;
-      }
-
-      // Công thức điểm thưởng chuẩn SRS 4.2.8: 1 điểm cho mỗi 10.000đ thanh toán
-      const calculatedPoints = Math.floor(verifiedFinalTotal / 10000);
 
       // Sinh mã đặt chỗ duy nhất dạng LGB-XXXXX theo SRS
       let finalBookingCode = newRes.bookingCode;
@@ -722,6 +745,55 @@ async function startServer() {
         }
         finalBookingCode = candidate;
       }
+
+      // 11. Xử lý tiêu điểm tích lũy giảm giá hóa đơn (Mục 1)
+      let verifiedPointsRedeemed = 0;
+      let verifiedPointsDiscount = 0;
+      const requestedPoints = Number(newRes.pointsRedeemed) || 0;
+      if (requestedPoints > 0 && newRes.userId) {
+        const targetUser = localUsers.find(u => u.id === newRes.userId);
+        if (targetUser && targetUser.loyaltyPoints >= requestedPoints) {
+          // 1 điểm = 100đ, tối đa 30% giá trị còn lại của thực đơn chọn trước
+          const remainingAmount = Math.max(0, verifiedPreOrderTotal - verifiedDiscount);
+          const maxAllowedDiscount = Math.round(remainingAmount * 0.3);
+          const rawDiscount = requestedPoints * 100;
+          if (rawDiscount <= maxAllowedDiscount) {
+            verifiedPointsRedeemed = requestedPoints;
+            verifiedPointsDiscount = rawDiscount;
+          } else {
+            verifiedPointsRedeemed = Math.floor(maxAllowedDiscount / 100);
+            verifiedPointsDiscount = verifiedPointsRedeemed * 100;
+          }
+
+          // Trừ điểm ngay lập tức và ghi vào sổ cái
+          if (verifiedPointsRedeemed > 0) {
+            targetUser.loyaltyPoints = Math.max(0, targetUser.loyaltyPoints - verifiedPointsRedeemed);
+            try {
+              await db.update(users).set({ loyaltyPoints: targetUser.loyaltyPoints }).where(eq(users.id, targetUser.id));
+            } catch {}
+
+            localPointsTransactions.unshift({
+              id: `pt-${Date.now()}`,
+              userId: targetUser.id,
+              amount: -verifiedPointsRedeemed,
+              type: 'redeem',
+              description: `Tiêu ${verifiedPointsRedeemed} điểm giảm ${verifiedPointsDiscount.toLocaleString('vi-VN')}đ`,
+              bookingCode: finalBookingCode,
+              createdAt: new Date().toISOString(),
+              balanceAfter: targetUser.loyaltyPoints,
+            });
+          }
+        }
+      }
+
+      const verifiedFinalTotal = Math.max(0, verifiedPreOrderTotal - verifiedDiscount - verifiedPointsDiscount);
+      let verifiedDeposit = 0;
+      if (newRes.depositAmount > 0) {
+        verifiedDeposit = verifiedFinalTotal > 0 ? Math.round(verifiedFinalTotal * 0.2 / 10000) * 10000 : 200000;
+      }
+
+      // Công thức điểm thưởng chuẩn SRS 4.2.8: 1 điểm cho mỗi 10.000đ thanh toán
+      const calculatedPoints = Math.floor(verifiedFinalTotal / 10000);
 
       const reservationData = {
         id: newRes.id || `res_${Date.now()}`,
@@ -740,6 +812,8 @@ async function startServer() {
         preOrderTotal: verifiedPreOrderTotal,
         depositAmount: verifiedDeposit,
         discountAmount: verifiedDiscount,
+        pointsRedeemed: verifiedPointsRedeemed,
+        pointsDiscount: verifiedPointsDiscount,
         voucherCode: inputVoucher,
         totalAmount: verifiedFinalTotal,
         status: (newRes.status || 'pending') as ValidStatus, // Trạng thái ban đầu luôn là 'pending' theo SRS 4.1.4.1
@@ -767,7 +841,11 @@ async function startServer() {
             .where(eq(tables.id, targetTable.id));
         }
 
-        res.status(201).json(inserted[0] || reservationData);
+        res.status(201).json(
+          inserted[0]
+            ? { ...inserted[0], pointsRedeemed: verifiedPointsRedeemed, pointsDiscount: verifiedPointsDiscount }
+            : reservationData
+        );
       } catch (error) {
         localReservations.unshift(reservationData as any);
         if (shouldMarkReservedToday) {
@@ -860,6 +938,41 @@ async function startServer() {
     const targetTableId = currentReservation.tableId;
     if (targetTableId) {
       if (newStatus === 'completed' || newStatus === 'cancelled') {
+        // Tự động tích lũy điểm khi hoàn tất dùng bữa (Mục 4)
+        if (newStatus === 'completed' && currentReservation.userId && currentReservation.pointsEarned > 0) {
+          const alreadyAwarded = localPointsTransactions.some(
+            tx => tx.type === 'earn' && tx.bookingCode === currentReservation.bookingCode
+          );
+          if (!alreadyAwarded) {
+            const matchedUser = localUsers.find(u => u.id === currentReservation.userId);
+            if (matchedUser) {
+              matchedUser.loyaltyPoints = (matchedUser.loyaltyPoints || 0) + currentReservation.pointsEarned;
+              if (matchedUser.loyaltyPoints >= 2500) matchedUser.membershipTier = 'Kim Cương';
+              else if (matchedUser.loyaltyPoints >= 1000) matchedUser.membershipTier = 'Vàng';
+              else if (matchedUser.loyaltyPoints >= 400) matchedUser.membershipTier = 'Bạc';
+              else matchedUser.membershipTier = 'Đồng';
+
+              try {
+                await db.update(users).set({
+                  loyaltyPoints: matchedUser.loyaltyPoints,
+                  membershipTier: matchedUser.membershipTier
+                }).where(eq(users.id, matchedUser.id));
+              } catch {}
+
+              localPointsTransactions.unshift({
+                id: `pt-${Date.now()}`,
+                userId: matchedUser.id,
+                amount: currentReservation.pointsEarned,
+                type: 'earn',
+                description: `Tích lũy hoàn tất dùng bữa #${currentReservation.bookingCode}`,
+                bookingCode: currentReservation.bookingCode,
+                createdAt: new Date().toISOString(),
+                balanceAfter: matchedUser.loyaltyPoints,
+              });
+            }
+          }
+        }
+
         // Khi hoàn tất hoặc hủy đơn -> Giải phóng bàn về available
         try {
           await db.update(tables)
@@ -888,6 +1001,212 @@ async function startServer() {
 
     res.json(currentReservation);
   });
+
+  // API Tự hủy đặt bàn cho khách hàng (Customer Self-Service Cancellation with 120-minute policy engine)
+  app.post('/api/reservations/:id/cancel', async (req, res) => {
+    const { id } = req.params;
+    const { reason, cancelNotes, customerPhone } = req.body || {};
+
+    // 1. Tìm đơn đặt bàn
+    let currentReservation: any = null;
+    try {
+      let dbFound = await db.select().from(reservations).where(eq(reservations.id, id));
+      if (dbFound.length === 0) {
+        dbFound = await db.select().from(reservations).where(eq(reservations.bookingCode, id));
+      }
+      currentReservation = dbFound[0];
+    } catch {
+      currentReservation = localReservations.find(r => r.id === id || (r as any).bookingCode === id);
+    }
+    if (!currentReservation) {
+      currentReservation = localReservations.find(r => r.id === id || (r as any).bookingCode === id);
+    }
+
+    if (!currentReservation) {
+      return res.status(404).json({
+        error: `Không tìm thấy đơn đặt bàn với mã hoặc ID: "${id}".`,
+        code: 'RESERVATION_NOT_FOUND'
+      });
+    }
+
+    // Kiểm tra số điện thoại nếu có gửi lên để bảo mật
+    if (customerPhone) {
+      const cleanPhoneInput = String(customerPhone).trim().replace(/\s+/g, '');
+      const cleanResPhone = String(currentReservation.customerPhone || '').trim().replace(/\s+/g, '');
+      if (cleanPhoneInput !== cleanResPhone) {
+        return res.status(403).json({
+          error: 'Số điện thoại xác nhận không khớp với thông tin đơn đặt bàn.',
+          code: 'PHONE_MISMATCH'
+        });
+      }
+    }
+
+    const currentStatus = currentReservation.status;
+    if (currentStatus === 'cancelled') {
+      return res.status(400).json({
+        error: 'Đơn đặt bàn này đã được hủy trước đó.',
+        code: 'ALREADY_CANCELLED',
+        reservation: currentReservation
+      });
+    }
+    if (currentStatus === 'seated' || currentStatus === 'completed') {
+      return res.status(400).json({
+        error: `Không thể hủy đơn đặt bàn đang ở trạng thái "${currentStatus}". Vui lòng liên hệ trực tiếp với nhân viên phục vụ tại nhà hàng.`,
+        code: 'INVALID_STATUS_FOR_CANCELLATION'
+      });
+    }
+
+    // 2. Kiểm tra chính sách hủy bàn 120 phút (SRS Business Rule)
+    const eligibility = checkCancellationEligibility(currentReservation.bookingDate, currentReservation.arrivalTime, 120);
+    if (!eligibility.canCancel) {
+      return res.status(400).json({
+        error: eligibility.reason || 'Đã quá thời hạn tự hủy bàn trực tuyến (trước tối thiểu 120 phút).',
+        code: 'CANCELLATION_DEADLINE_EXCEEDED',
+        minutesRemaining: eligibility.minutesRemaining,
+        hotline: '0903.888.999'
+      });
+    }
+
+    // 3. Thực hiện hủy đơn trong CSDL / In-memory
+    const cancelledAt = new Date().toISOString();
+    const finalReason = reason ? String(reason).trim() : 'Khách hàng tự hủy trực tuyến';
+    const notes = cancelNotes ? String(cancelNotes).trim() : '';
+
+    try {
+      const updated = await db.update(reservations).set({ status: 'cancelled' }).where(eq(reservations.id, currentReservation.id)).returning();
+      currentReservation = updated[0] || { ...currentReservation, status: 'cancelled' };
+    } catch {
+      const rIdx = localReservations.findIndex(r => r.id === currentReservation.id || (r as any).bookingCode === currentReservation.bookingCode);
+      if (rIdx !== -1) {
+        localReservations[rIdx] = { ...localReservations[rIdx], status: 'cancelled' as any, cancellationReason: finalReason, cancelledAt };
+        currentReservation = localReservations[rIdx];
+      } else {
+        currentReservation.status = 'cancelled';
+      }
+    }
+
+    // 4. Giải phóng bàn ngay lập tức về 'available'
+    const targetTableId = currentReservation.tableId;
+    if (targetTableId) {
+      try {
+        await db.update(tables)
+          .set({ status: 'available', currentReservationId: null })
+          .where(eq(tables.id, targetTableId));
+      } catch {
+        const tIdx = localTables.findIndex(t => t.id === targetTableId);
+        if (tIdx !== -1) {
+          localTables[tIdx] = { ...localTables[tIdx], status: 'available', currentReservationId: undefined };
+        }
+      }
+    }
+
+    // 5. Tự động sinh email thông báo hủy bàn & ghi nhật ký
+    const depositAmount = currentReservation.depositAmount || 0;
+    const cancelEmailSubject = `[Le Gourmet Bistro] Xác Nhận Hủy Đặt Bàn #${currentReservation.bookingCode}`;
+    const cancelEmailContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1c1917; background-color: #fafaf9; border-radius: 12px; border: 1px solid #e7e5e4;">
+        <div style="text-align: center; border-bottom: 2px solid #d97706; padding-bottom: 16px; margin-bottom: 20px;">
+          <h1 style="color: #1c1917; margin: 0; font-size: 24px; letter-spacing: 1px;">LE GOURMET BISTRO</h1>
+          <p style="color: #78716c; margin: 6px 0 0; font-size: 13px;">Ẩm Thực Pháp Tinh Hoa • 128 Nguyễn Huệ, Quận 1, TP.HCM</p>
+        </div>
+        <h2 style="color: #b91c1c; font-size: 18px; margin-top: 0;">Thông Báo Xác Nhận Hủy Đặt Bàn</h2>
+        <p>Kính gửi quý khách <strong>${currentReservation.customerName}</strong>,</p>
+        <p>Hệ thống Le Gourmet Bistro xin xác nhận đã hủy thành công yêu cầu đặt bàn của quý khách với các thông tin sau:</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 16px 0; background: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #e7e5e4;">
+          <tr style="border-bottom: 1px solid #f5f5f4;"><td style="padding: 10px 14px; color: #78716c; font-size: 13px;">Mã đặt bàn:</td><td style="padding: 10px 14px; font-weight: bold; font-family: monospace; font-size: 14px; color: #b45309;">#${currentReservation.bookingCode}</td></tr>
+          <tr style="border-bottom: 1px solid #f5f5f4;"><td style="padding: 10px 14px; color: #78716c; font-size: 13px;">Thời gian đã hẹn:</td><td style="padding: 10px 14px; font-weight: bold; font-size: 13px;">${currentReservation.arrivalTime} • Ngày ${currentReservation.bookingDate}</td></tr>
+          <tr style="border-bottom: 1px solid #f5f5f4;"><td style="padding: 10px 14px; color: #78716c; font-size: 13px;">Bàn & Số khách:</td><td style="padding: 10px 14px; font-size: 13px;">${currentReservation.tableName} (${currentReservation.guestCount} người)</td></tr>
+          <tr style="border-bottom: 1px solid #f5f5f4;"><td style="padding: 10px 14px; color: #78716c; font-size: 13px;">Lý do hủy:</td><td style="padding: 10px 14px; font-size: 13px; color: #44403c;">${finalReason}${notes ? ` (${notes})` : ''}</td></tr>
+          <tr><td style="padding: 10px 14px; color: #78716c; font-size: 13px;">Thời điểm hủy:</td><td style="padding: 10px 14px; font-size: 13px; color: #44403c;">${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}</td></tr>
+        </table>
+        ${depositAmount > 0 ? `
+          <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 14px; margin: 16px 0; color: #065f46; font-size: 13px;">
+            <strong style="display: block; margin-bottom: 4px;">Chính Sách Hoàn Tiền Đặt Cọc (100%):</strong>
+            Do quý khách thực hiện hủy trước 120 phút theo đúng quy định, khoản tiền cọc <strong>${depositAmount.toLocaleString('vi-VN')} đ</strong> sẽ được hoàn trả đầy đủ vào tài khoản/thẻ thanh toán của quý khách trong vòng 24 giờ làm việc.
+          </div>
+        ` : ''}
+        <p style="font-size: 13px; color: #78716c; line-height: 1.5;">Chúng tôi rất tiếc vì chưa có cơ hội được đón tiếp quý khách lần này và rất mong được phục vụ quý khách trong những dịp ẩm thực sắp tới.</p>
+        <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e7e5e4; text-align: center; font-size: 12px; color: #a8a29e;">
+          Mọi thắc mắc xin vui lòng liên hệ Hotline: <strong>0903.888.999</strong> hoặc email: <strong>booking@legourmetbistro.vn</strong>
+        </div>
+      </div>
+    `;
+
+    const cancelLog = {
+      id: `em-cancel-${Date.now()}`,
+      recipientEmail: currentReservation.customerEmail || 'customer@example.com',
+      recipientName: currentReservation.customerName || 'Quý Khách',
+      bookingCode: currentReservation.bookingCode,
+      sentAt: new Date().toISOString(),
+      subject: cancelEmailSubject,
+      status: 'delivered',
+      type: 'cancellation',
+      previewBody: cancelEmailContent
+    };
+
+    try {
+      await db.insert(emailLogs).values(cancelLog);
+    } catch {
+      localEmailLogs.unshift(cancelLog as any);
+    }
+
+    // Hoàn lại điểm tích lũy đã tiêu (nếu có) khi hủy đơn
+    let refundedPoints = 0;
+    if (currentReservation.pointsRedeemed > 0 && currentReservation.userId) {
+      const alreadyRefunded = localPointsTransactions.some(
+        tx => tx.type === 'refund' && tx.bookingCode === currentReservation.bookingCode
+      );
+      if (!alreadyRefunded) {
+        const matchedUser = localUsers.find(u => u.id === currentReservation.userId);
+        if (matchedUser) {
+          refundedPoints = currentReservation.pointsRedeemed;
+          matchedUser.loyaltyPoints = (matchedUser.loyaltyPoints || 0) + refundedPoints;
+          try {
+            await db.update(users).set({ loyaltyPoints: matchedUser.loyaltyPoints }).where(eq(users.id, matchedUser.id));
+          } catch {}
+
+          localPointsTransactions.unshift({
+            id: `pt-${Date.now()}`,
+            userId: matchedUser.id,
+            amount: refundedPoints,
+            type: 'refund',
+            description: `Hoàn ${refundedPoints} điểm từ đơn hủy #${currentReservation.bookingCode}`,
+            bookingCode: currentReservation.bookingCode,
+            createdAt: new Date().toISOString(),
+            balanceAfter: matchedUser.loyaltyPoints,
+          });
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Đã hủy thành công đơn đặt bàn #${currentReservation.bookingCode}. Bàn ${currentReservation.tableName} đã được giải phóng.`,
+      reservation: {
+        ...currentReservation,
+        status: 'cancelled',
+        cancellationReason: finalReason,
+        cancelledAt
+      },
+      refundInfo: depositAmount > 0 || refundedPoints > 0 ? {
+        refundEligible: true,
+        depositAmount,
+        refundedPoints,
+        note: depositAmount > 0 
+          ? `Hoàn 100% tiền cọc (${depositAmount.toLocaleString('vi-VN')} đ)${refundedPoints > 0 ? ` và hoàn lại ${refundedPoints} điểm` : ''} trong 24 giờ.`
+          : `Đã hoàn lại ${refundedPoints} điểm thưởng vào ví thành viên.`
+      } : null
+    });
+  });
+
+  // API Sổ cái biến động điểm thành viên (Mục 3: Points Transaction History)
+  app.get('/api/users/:id/points-ledger', async (req, res) => {
+    const { id } = req.params;
+    const userTxs = localPointsTransactions.filter(tx => tx.userId === id);
+    res.json(userTxs);
+  });
+
+
 
   // -------------------------------------------------------------
   // Users API

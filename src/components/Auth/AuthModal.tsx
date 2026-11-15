@@ -19,7 +19,7 @@ import {
   Utensils
 } from 'lucide-react';
 import { UserAccount } from '../../types';
-import { loginUser, registerUser, resetUserPassword } from '../../services/storage';
+import { loginUser, registerUser, resetUserPassword, saveCurrentUser } from '../../services/storage';
 import { apiService } from '../../services/api';
 
 interface AuthModalProps {
@@ -70,6 +70,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const serverAuth = await apiService.login(email, pass);
       if (serverAuth.success && serverAuth.user) {
         setIsLoading(false);
+        saveCurrentUser(serverAuth.user);
         onSuccessLogin(serverAuth.user, serverAuth.message || 'Đăng nhập thành công!');
         onClose();
         return;
@@ -77,6 +78,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const res = loginUser(email, pass);
       setIsLoading(false);
       if (res.success && res.user) {
+        saveCurrentUser(res.user);
         onSuccessLogin(res.user, res.message);
         onClose();
       } else {
@@ -108,6 +110,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const serverAuth = await apiService.login(loginIdentifier, loginPassword);
       if (serverAuth.success && serverAuth.user) {
         setIsLoading(false);
+        saveCurrentUser(serverAuth.user);
         onSuccessLogin(serverAuth.user, serverAuth.message || 'Đăng nhập thành công!');
         onClose();
         return;
@@ -116,6 +119,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const res = loginUser(loginIdentifier, loginPassword);
       setIsLoading(false);
       if (res.success && res.user) {
+        saveCurrentUser(res.user);
         onSuccessLogin(res.user, res.message);
         onClose();
       } else {

@@ -158,3 +158,75 @@ export function getDefaultBookingDateTime(): { date: string; time: string; isTom
   const tomorrowStr = getVietnamTomorrowDateStr();
   return { date: tomorrowStr, time: '18:30', isTomorrowSuggested: true };
 }
+
+export interface CancellationEligibility {
+  canCancel: boolean;
+  minutesRemaining: number;
+  reason?: string;
+  isPast?: boolean;
+}
+
+/**
+ * Checks if a reservation can be cancelled online based on the 120-minute policy.
+ * Must be at least 120 minutes prior to arrival time.
+ */
+export function checkCancellationEligibility(
+  bookingDate: string,
+  arrivalTime: string,
+  minBufferMinutes = 120
+): CancellationEligibility {
+  if (!bookingDate || !arrivalTime) {
+    return { canCancel: false, minutesRemaining: 0, reason: 'Thông tin ngày giờ đặt bàn không hợp lệ.' };
+  }
+
+  const vnNow = getVietnamNow();
+  const todayVnStr = vnNow.dateStr;
+
+  // Past date
+  if (bookingDate < todayVnStr) {
+    return {
+      canCancel: false,
+      minutesRemaining: -9999,
+      isPast: true,
+      reason: 'Lịch đặt bàn đã qua ngày phục vụ.',
+    };
+  }
+
+  // Parse arrival time
+  const [h, m] = arrivalTime.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) {
+    return { canCancel: false, minutesRemaining: 0, reason: 'Khung giờ đặt bàn không hợp lệ.' };
+  }
+  const arrivalTotalMinutes = h * 60 + m;
+
+  // Calculate day difference
+  const dateDiffDays = Math.round(
+    (new Date(`${bookingDate}T00:00:00+07:00`).getTime() - new Date(`${todayVnStr}T00:00:00+07:00`).getTime()) /
+      (24 * 60 * 60 * 1000)
+  );
+
+  const minutesRemaining = (dateDiffDays * 24 * 60) + (arrivalTotalMinutes - vnNow.totalMinutes);
+
+  if (minutesRemaining < 0) {
+    return {
+      canCancel: false,
+      minutesRemaining,
+      isPast: true,
+      reason: 'Giờ hẹn đặt bàn đã trôi qua.',
+    };
+  }
+
+  if (minutesRemaining < minBufferMinutes) {
+    return {
+      canCancel: false,
+      minutesRemaining,
+      reason: `Đã quá thời hạn tự hủy trực tuyến (yêu cầu trước giờ hẹn tối thiểu ${minBufferMinutes} phút). Bếp đã chuẩn bị sẵn nguyên liệu tươi sống cho quý khách.`,
+    };
+  }
+
+  return {
+    canCancel: true,
+    minutesRemaining,
+  };
+}
+

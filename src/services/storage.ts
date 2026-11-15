@@ -23,9 +23,10 @@ import {
   TableServiceRequestType,
   TableServiceStatus,
   CustomerReview,
-  CSATSummaryMetrics
+  CSATSummaryMetrics,
+  PointsTransaction
 } from '../types';
-import { INITIAL_RESERVATIONS, INITIAL_TABLES, INITIAL_EMAIL_LOGS, INITIAL_USERS, MENU_ITEMS } from '../data/mockData';
+import { INITIAL_RESERVATIONS, INITIAL_TABLES, INITIAL_EMAIL_LOGS, INITIAL_USERS, MENU_ITEMS, INITIAL_POINTS_TRANSACTIONS } from '../data/mockData';
 import { INITIAL_INGREDIENTS, INITIAL_RECIPES, INITIAL_INVENTORY_LOGS } from '../data/inventoryData';
 import { INITIAL_CUSTOMER_REVIEWS, INITIAL_TABLE_SERVICE_REQUESTS } from '../data/reviewsAndServiceData';
 
@@ -42,6 +43,8 @@ const RECIPE_BOM_KEY = 'restaurant_recipe_bom_v1';
 const INVENTORY_LOGS_KEY = 'restaurant_inventory_logs_v1';
 const SERVICE_REQUESTS_KEY = 'restaurant_service_requests_v1';
 const CUSTOMER_REVIEWS_KEY = 'restaurant_customer_reviews_v1';
+const POINTS_TRANSACTIONS_KEY = 'restaurant_points_transactions_v1';
+
 
 
 export function getStoredUsers(): UserAccount[] {
@@ -289,26 +292,145 @@ export function toggleFavoriteDish(userId: string, dishId: string): UserAccount 
   return updateUserProfile(userId, { favoriteDishIds: newFavs });
 }
 
+export function calculateTierFromPoints(points: number): MembershipTier {
+  if (points >= 2500) return 'Kim Cương';
+  if (points >= 1000) return 'Vàng';
+  if (points >= 400) return 'Bạc';
+  return 'Đồng';
+}
+
 export function addLoyaltyPoints(userId: string, pointsToAdd: number): UserAccount | null {
   const users = getStoredUsers();
   const user = users.find(u => u.id === userId);
   if (!user) return null;
 
-  const newPoints = (user.loyaltyPoints || 0) + pointsToAdd;
-  let newTier: MembershipTier = user.membershipTier;
-
-  if (newPoints >= 1500) {
-    newTier = 'Kim Cương';
-  } else if (newPoints >= 400) {
-    newTier = 'Vàng';
-  } else {
-    newTier = 'Bạc';
-  }
+  const newPoints = Math.max(0, (user.loyaltyPoints || 0) + pointsToAdd);
+  const newTier: MembershipTier = calculateTierFromPoints(newPoints);
 
   return updateUserProfile(userId, {
     loyaltyPoints: newPoints,
     membershipTier: newTier,
   });
+}
+
+export function getStoredPointsTransactions(userId?: string): PointsTransaction[] {
+  try {
+    const data = localStorage.getItem(POINTS_TRANSACTIONS_KEY);
+    if (data) {
+      const list: PointsTransaction[] = JSON.parse(data);
+      if (userId) {
+        return list.filter(tx => tx.userId === userId);
+      }
+      return list;
+    }
+  } catch (e) {
+    console.error('Failed to parse points transactions', e);
+  }
+  saveStoredPointsTransactions(INITIAL_POINTS_TRANSACTIONS);
+  if (userId) {
+    return INITIAL_POINTS_TRANSACTIONS.filter(tx => tx.userId === userId);
+  }
+  return INITIAL_POINTS_TRANSACTIONS;
+}
+
+export function saveStoredPointsTransactions(transactions: PointsTransaction[]): void {
+  try {
+    localStorage.setItem(POINTS_TRANSACTIONS_KEY, JSON.stringify(transactions));
+  } catch (e) {
+    console.error('Failed to save points transactions', e);
+  }
+}
+
+export function addPointsTransaction(
+  tx: Omit<PointsTransaction, 'id' | 'createdAt'>
+): PointsTransaction {
+  const current = getStoredPointsTransactions();
+  const newTx: PointsTransaction = {
+    ...tx,
+    id: `pt-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
+    createdAt: new Date().toISOString(),
+  };
+  const updated = [newTx, ...current];
+  saveStoredPointsTransactions(updated);
+  return newTx;
+}
+
+export function awardPointsForCompletedReservation(reservation: Reservation): { awarded: boolean; points: number; newTier?: string } {
+  if (!reservation.userId || !reservation.pointsEarned || reservation.pointsEarned <= 0) {
+    return { awarded: false, points: 0 };
+  }
+
+  // Prevent double awarding for the same booking
+  const existingLedger = getStoredPointsTransactions(reservation.userId);
+  const alreadyAwarded = existingLedger.some(
+    tx => tx.type === 'earn' && tx.bookingCode === reservation.bookingCode
+  );
+  if (alreadyAwarded) {
+    return { awarded: false, points: 0 };
+  }
+
+  const users = getStoredUsers();
+  const user = users.find(u => u.id === reservation.userId);
+  if (!user) return { awarded: false, points: 0 };
+
+  const pointsToAdd = reservation.pointsEarned;
+  const newPoints = (user.loyaltyPoints || 0) + pointsToAdd;
+  const newTier = calculateTierFromPoints(newPoints);
+
+  updateUserProfile(user.id, {
+    loyaltyPoints: newPoints,
+    membershipTier: newTier,
+  });
+
+  addPointsTransaction({
+    userId: user.id,
+    amount: pointsToAdd,
+    type: 'earn',
+    description: `Tích lũy hoàn tất dùng bữa #${reservation.bookingCode} (${formatVND(reservation.totalAmount)})`,
+    bookingCode: reservation.bookingCode,
+    balanceAfter: newPoints,
+  });
+
+  return { awarded: true, points: pointsToAdd, newTier };
+}
+
+export function refundPointsForCancelledReservation(reservation: Reservation): { refunded: boolean; points: number } {
+  if (!reservation.userId || !reservation.pointsRedeemed || reservation.pointsRedeemed <= 0) {
+    return { refunded: false, points: 0 };
+  }
+
+  // Prevent double refund
+  const existingLedger = getStoredPointsTransactions(reservation.userId);
+  const alreadyRefunded = existingLedger.some(
+    tx => tx.type === 'refund' && tx.bookingCode === reservation.bookingCode
+  );
+  if (alreadyRefunded) {
+    return { refunded: false, points: 0 };
+  }
+
+  const users = getStoredUsers();
+  const user = users.find(u => u.id === reservation.userId);
+  if (!user) return { refunded: false, points: 0 };
+
+  const pointsToRefund = reservation.pointsRedeemed;
+  const newPoints = (user.loyaltyPoints || 0) + pointsToRefund;
+  const newTier = calculateTierFromPoints(newPoints);
+
+  updateUserProfile(user.id, {
+    loyaltyPoints: newPoints,
+    membershipTier: newTier,
+  });
+
+  addPointsTransaction({
+    userId: user.id,
+    amount: pointsToRefund,
+    type: 'refund',
+    description: `Hoàn ${pointsToRefund} điểm từ đơn hủy #${reservation.bookingCode}`,
+    bookingCode: reservation.bookingCode,
+    balanceAfter: newPoints,
+  });
+
+  return { refunded: true, points: pointsToRefund };
 }
 
 export function getStoredReservations(): Reservation[] {
@@ -406,7 +528,7 @@ export function generateBookingEmailHtml(reservation: Reservation): string {
     <tr>
       <td style="background: linear-gradient(135deg, #1c1917 0%, #292524 100%); padding: 32px 24px; text-align: center; color: #ffffff;">
         <div style="font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: #e2a03f; font-weight: 700; margin-bottom: 6px;">LE GOURMET BISTRO</div>
-        <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #ffffff;">Xác Nhận Đặt Bàn Tự Động</h1>
+        <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #ffffff;">${reservation.status === 'confirmed' ? 'Xác Nhận Đặt Bàn Thành Công' : 'Tiếp Nhận Yêu Cầu Đặt Bàn'}</h1>
         <p style="margin: 8px 0 0; color: #a8a29e; font-size: 14px;">Mã đặt chỗ: <strong style="color: #f59e0b; font-size: 16px; letter-spacing: 1px;">#${reservation.bookingCode}</strong></p>
       </td>
     </tr>
@@ -418,7 +540,7 @@ export function generateBookingEmailHtml(reservation: Reservation): string {
           Kính gửi <strong>${reservation.customerName}</strong>,
         </p>
         <p style="margin: 10px 0 0; font-size: 14px; line-height: 1.6; color: #57534e;">
-          Cảm ơn quý khách đã tin tưởng và lựa chọn Le Gourmet Bistro. Yêu cầu đặt bàn của quý khách đã được hệ thống tự động ghi nhận và xác nhận thành công với các thông tin chi tiết dưới đây:
+          Cảm ơn quý khách đã tin tưởng và lựa chọn Le Gourmet Bistro. ${reservation.status === 'confirmed' ? 'Yêu cầu đặt bàn của quý khách đã được hệ thống ghi nhận và xác nhận thành công với các thông tin chi tiết dưới đây:' : 'Yêu cầu đặt chỗ của quý khách đã được tiếp nhận thành công vào hệ thống và đang chờ nhà hàng xếp bàn. Thông tin chi tiết lịch hẹn như sau:'}
         </p>
       </td>
     </tr>
@@ -584,7 +706,7 @@ export function addNewReservation(
     ...newReservationData,
     id: `res-${Date.now()}`,
     bookingCode,
-    status: 'confirmed',
+    status: (newReservationData as any).status || (newReservationData.depositAmount && newReservationData.depositAmount > 0 ? 'confirmed' : 'pending'),
     createdAt: now,
     emailConfirmationSent: true,
     emailSentAt: now,
@@ -600,10 +722,29 @@ export function addNewReservation(
 
   if (matchedUser) {
     newReservation.userId = matchedUser.id;
-    // 1 point per 10,000 VND (minimum 20 points)
-    const points = Math.max(20, Math.floor(newReservation.totalAmount / 10000));
+    // Điểm thưởng DỰ KIẾN nhận được sau khi dùng bữa xong (1 điểm / 10.000đ)
+    const points = Math.max(0, Math.floor(newReservation.totalAmount / 10000));
     newReservation.pointsEarned = points;
-    addLoyaltyPoints(matchedUser.id, points);
+
+    // Nếu khách dùng điểm giảm giá: trừ điểm ngay tại thời điểm đặt bàn và ghi sổ cái
+    if (newReservation.pointsRedeemed && newReservation.pointsRedeemed > 0) {
+      const actualRedeemed = Math.min(newReservation.pointsRedeemed, matchedUser.loyaltyPoints || 0);
+      newReservation.pointsRedeemed = actualRedeemed;
+      const newPoints = Math.max(0, (matchedUser.loyaltyPoints || 0) - actualRedeemed);
+      const newTier = calculateTierFromPoints(newPoints);
+      updateUserProfile(matchedUser.id, {
+        loyaltyPoints: newPoints,
+        membershipTier: newTier,
+      });
+      addPointsTransaction({
+        userId: matchedUser.id,
+        amount: -actualRedeemed,
+        type: 'redeem',
+        description: `Tiêu ${actualRedeemed} điểm giảm ${formatVND(newReservation.pointsDiscount || actualRedeemed * 100)} đơn #${newReservation.bookingCode}`,
+        bookingCode: newReservation.bookingCode,
+        balanceAfter: newPoints,
+      });
+    }
   }
 
   // Update table status to reserved or occupied if date is today
@@ -633,7 +774,9 @@ export function addNewReservation(
     id: `em-${Date.now()}`,
     toEmail: newReservation.customerEmail,
     toName: newReservation.customerName,
-    subject: `✨ Xác nhận đặt bàn thành công #${bookingCode} - Nhà Hàng Le Gourmet Bistro`,
+    subject: newReservation.status === 'confirmed'
+      ? `✨ Xác nhận đặt bàn thành công #${bookingCode} - Nhà Hàng Le Gourmet Bistro`
+      : `⏳ Tiếp nhận yêu cầu đặt bàn #${bookingCode} (Đang chờ xác nhận) - Nhà Hàng Le Gourmet Bistro`,
     sentAt: now,
     bookingCode,
     reservationId: newReservation.id,
@@ -727,8 +870,101 @@ export function updateReservationStatus(reservationId: string, newStatus: Reserv
     ensureKitchenTicketForCheckIn(targetReservation);
   }
 
+  // Tự động cộng điểm vào ví khi hoàn tất (Mục 4) hoặc hoàn điểm khi hủy đơn
+  if (newStatus === 'completed') {
+    awardPointsForCompletedReservation(targetReservation);
+  } else if (newStatus === 'cancelled') {
+    refundPointsForCancelledReservation(targetReservation);
+  }
+
   return { updated: targetReservation, emailLog: statusEmailLog };
 }
+
+export function cancelStoredReservation(
+  idOrCode: string,
+  reason: string = 'Khách hàng tự hủy trực tuyến',
+  notes?: string
+): { success: boolean; reservation?: Reservation; message: string; refundInfo?: any } {
+  const currentReservations = getStoredReservations();
+  const currentTables = getStoredTables();
+  const currentEmailLogs = getStoredEmailLogs();
+
+  const targetIndex = currentReservations.findIndex(
+    r => r.id === idOrCode || r.bookingCode === idOrCode
+  );
+
+  if (targetIndex === -1) {
+    return { success: false, message: `Không tìm thấy đơn đặt bàn #${idOrCode}` };
+  }
+
+  const res = currentReservations[targetIndex];
+  if (res.status === 'cancelled') {
+    return { success: false, message: 'Đơn đặt bàn này đã được hủy trước đó.', reservation: res };
+  }
+  if (res.status === 'seated' || res.status === 'completed') {
+    return { success: false, message: `Đơn đang ở trạng thái "${res.status}", không thể tự hủy.` };
+  }
+
+  const cancelledReservation: Reservation = {
+    ...res,
+    status: 'cancelled',
+    cancellationReason: reason,
+    cancellationNotes: notes,
+    cancelledAt: new Date().toISOString(),
+  };
+
+  const updatedReservations = [...currentReservations];
+  updatedReservations[targetIndex] = cancelledReservation;
+
+  const targetTableIds = new Set(
+    res.tableIds && res.tableIds.length > 0 ? res.tableIds : [res.tableId]
+  );
+
+  const updatedTables = currentTables.map(tbl => {
+    if (targetTableIds.has(tbl.id)) {
+      return { ...tbl, status: 'available' as const, currentReservationId: undefined, mergedWithTableIds: undefined };
+    }
+    return tbl;
+  });
+
+  const depositAmount = res.depositAmount || 0;
+  const cancelHtml = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1c1917; background-color: #fafaf9; border-radius: 12px; border: 1px solid #e7e5e4;">
+      <h2 style="color: #b91c1c; font-size: 18px;">Thông Báo Xác Nhận Hủy Đặt Bàn #${res.bookingCode}</h2>
+      <p>Kính gửi quý khách <strong>${res.customerName}</strong>,</p>
+      <p>Đơn đặt bàn của quý khách đã được hủy thành công theo yêu cầu.</p>
+      <p>Lý do: ${reason} ${notes ? `(${notes})` : ''}</p>
+      ${depositAmount > 0 ? `<p style="color: #065f46;">Khoản cọc <strong>${depositAmount.toLocaleString('vi-VN')} đ</strong> sẽ được hoàn trả theo chính sách 100%.</p>` : ''}
+    </div>
+  `;
+
+  const cancelEmailLog: SentEmailLog = {
+    id: `em-cancel-${Date.now()}`,
+    toEmail: res.customerEmail,
+    toName: res.customerName,
+    subject: `[Thông báo] Đã hủy đặt bàn #${res.bookingCode} - Le Gourmet Bistro`,
+    sentAt: new Date().toISOString(),
+    bookingCode: res.bookingCode,
+    reservationId: res.id,
+    type: 'status_update',
+    htmlContent: cancelHtml,
+  };
+
+  saveStoredReservations(updatedReservations);
+  saveStoredTables(updatedTables);
+  saveStoredEmailLogs([cancelEmailLog, ...currentEmailLogs]);
+
+  // Hoàn lại điểm thưởng đã tiêu (nếu có) vào ví khách hàng (Mục 1 & 4)
+  refundPointsForCancelledReservation(cancelledReservation);
+
+  return {
+    success: true,
+    reservation: cancelledReservation,
+    message: `Đã hủy thành công đơn đặt bàn #${res.bookingCode}`,
+    refundInfo: depositAmount > 0 ? { refundEligible: true, depositAmount } : null,
+  };
+}
+
 
 export function deleteEmailLog(logId: string): SentEmailLog[] {
   const logs = getStoredEmailLogs();
@@ -907,11 +1143,8 @@ export function checkoutAndSettleReservation(
   saveStoredTables(updatedTables);
 
 
-  // Award loyalty points to user if registered
-  if (reservation.userId) {
-    const pointsEarned = Math.floor(reservation.totalAmount / 20000); // 1 point per 20,000 VND
-    addLoyaltyPoints(reservation.userId, pointsEarned);
-  }
+  // Tự động tích lũy điểm thưởng và ghi sổ cái khi thu ngân hoàn tất thanh toán (Mục 4)
+  awardPointsForCompletedReservation(updatedReservation);
 
   return { updatedReservation, updatedTables };
 }

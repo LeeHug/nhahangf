@@ -17,6 +17,7 @@ import {
   Utensils, 
   Compass, 
   ShieldCheck,
+  ShieldAlert,
   Share2,
   Info,
   RotateCcw,
@@ -27,6 +28,7 @@ import { Reservation } from '../../types';
 import { formatVND, downloadIcsCalendar } from '../../services/storage';
 import { TableSelfServiceModal } from '../TableService/TableSelfServiceModal';
 import { CustomerReviewModal } from '../Feedback/CustomerReviewModal';
+import { CancelReservationModal } from './CancelReservationModal';
 
 interface CheckInBillProps {
   reservation: Reservation;
@@ -37,18 +39,24 @@ interface CheckInBillProps {
 }
 
 export const CheckInBill: React.FC<CheckInBillProps> = ({
-  reservation,
+  reservation: initialReservation,
   onOpenEmailPreview,
   onResetBooking,
   onClose,
   showNewBookingBtn = true,
 }) => {
+  const [reservation, setReservation] = useState<Reservation>(initialReservation);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [isCopied, setIsCopied] = useState(false);
   const [isCopiedLink, setIsCopiedLink] = useState(false);
   const [isSelfServiceOpen, setIsSelfServiceOpen] = useState(false);
   const [isReviewOpen, setIsReviewOpen] = useState(false);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const billRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setReservation(initialReservation);
+  }, [initialReservation]);
 
   // Generate authentic scannable QR Code
   useEffect(() => {
@@ -115,18 +123,42 @@ export const CheckInBill: React.FC<CheckInBillProps> = ({
 
   const subTotal = reservation.preOrderTotal || 0;
   const discount = reservation.discountAmount || 0;
+  const pointsDiscount = reservation.pointsDiscount || 0;
   const depositPaid = reservation.depositAmount || 0;
-  const remainingEstimate = Math.max(0, subTotal - discount - depositPaid);
+  const remainingEstimate = Math.max(0, subTotal - discount - pointsDiscount - depositPaid);
 
   return (
     <div className="w-full max-w-3xl mx-auto space-y-6">
       {/* Top action bar - Hidden during print */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-stone-900 text-stone-100 p-4 rounded-2xl shadow-md print:hidden">
         <div className="flex items-center gap-2 text-xs sm:text-sm">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="font-bold text-amber-400">Phiếu Đặt Bàn Đã Kích Hoạt</span>
-          <span className="text-stone-500">•</span>
-          <span className="text-stone-300">Sẵn sàng xuất trình khi đến nhà hàng</span>
+          {reservation.status === 'confirmed' ? (
+            <>
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="font-bold text-emerald-400">Phiếu Đặt Bàn Đã Kích Hoạt</span>
+              <span className="text-stone-500">•</span>
+              <span className="text-stone-300">Sẵn sàng xuất trình khi đến nhà hàng</span>
+            </>
+          ) : reservation.status === 'pending' ? (
+            <>
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+              <span className="font-bold text-amber-400">Yêu Cầu Đặt Bàn Đang Chờ Xác Nhận</span>
+              <span className="text-stone-500">•</span>
+              <span className="text-stone-300">Nhà hàng sẽ duyệt và gửi email sớm nhất</span>
+            </>
+          ) : reservation.status === 'seated' ? (
+            <>
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-pulse" />
+              <span className="font-bold text-blue-400">Đang Phục Vụ Tại Bàn</span>
+              <span className="text-stone-500">•</span>
+              <span className="text-stone-300">Quý khách có thể gọi món thêm bất cứ lúc nào</span>
+            </>
+          ) : (
+            <>
+              <span className="w-2.5 h-2.5 rounded-full bg-stone-400" />
+              <span className="font-bold text-stone-300">Phiếu Đặt Chỗ #{reservation.bookingCode}</span>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -206,9 +238,42 @@ export const CheckInBill: React.FC<CheckInBillProps> = ({
 
             {/* Official Pass Badge */}
             <div className="flex flex-col items-center sm:items-end justify-center shrink-0">
-              <div className="px-3.5 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>Đã Xác Nhận Đặt Bàn</span>
+              <div className={`px-3.5 py-1.5 rounded-xl border text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5 ${
+                reservation.status === 'confirmed'
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                  : reservation.status === 'pending'
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                  : reservation.status === 'seated'
+                  ? 'bg-blue-500/20 border-blue-500/40 text-blue-300'
+                  : reservation.status === 'completed'
+                  ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
+                  : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+              }`}>
+                {reservation.status === 'confirmed' ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>Đã Xác Nhận Đặt Bàn</span>
+                  </>
+                ) : reservation.status === 'pending' ? (
+                  <>
+                    <Clock className="w-4 h-4 text-amber-400 animate-pulse" />
+                    <span>Chờ Nhà Hàng Xác Nhận</span>
+                  </>
+                ) : reservation.status === 'seated' ? (
+                  <>
+                    <Utensils className="w-4 h-4 text-blue-400" />
+                    <span>Đang Phục Vụ Tại Bàn</span>
+                  </>
+                ) : reservation.status === 'completed' ? (
+                  <>
+                    <Sparkles className="w-4 h-4 text-purple-400" />
+                    <span>Đã Hoàn Tất Phục Vụ</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Đã Hủy Đặt Bàn</span>
+                  </>
+                )}
               </div>
               <span className="text-[11px] text-stone-400 mt-1 font-mono">
                 Mã hệ thống: #{reservation.id.slice(0, 10)}
@@ -479,6 +544,13 @@ export const CheckInBill: React.FC<CheckInBillProps> = ({
                 </div>
               )}
 
+              {pointsDiscount > 0 && (
+                <div className="flex justify-between text-emerald-700">
+                  <span>Tiêu điểm tích lũy ({reservation.pointsRedeemed || 0} điểm):</span>
+                  <span className="font-bold font-mono">-{formatVND(pointsDiscount)}</span>
+                </div>
+              )}
+
               <div className="flex justify-between text-stone-600">
                 <span>Khoản tiền đặt cọc đã ghi nhận:</span>
                 <span className="font-bold text-amber-800 font-mono">
@@ -501,11 +573,15 @@ export const CheckInBill: React.FC<CheckInBillProps> = ({
               </div>
             </div>
 
-            {reservation.pointsEarned && reservation.pointsEarned > 0 ? (
+            {reservation.pointsEarned && reservation.pointsEarned > 0 && reservation.status !== 'cancelled' ? (
               <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between text-xs text-amber-900">
                 <span className="flex items-center gap-1.5 font-medium">
                   <Sparkles className="w-4 h-4 text-amber-600" />
-                  <span>Điểm thưởng tích lũy dự kiến cho bữa ăn này:</span>
+                  <span>
+                    {reservation.status === 'completed'
+                      ? 'Điểm thưởng đã cộng vào ví thành viên:'
+                      : 'Điểm thưởng dự kiến cộng sau khi hoàn tất bữa ăn:'}
+                  </span>
                 </span>
                 <strong className="font-bold text-amber-700">+{reservation.pointsEarned} điểm</strong>
               </div>
@@ -601,6 +677,17 @@ export const CheckInBill: React.FC<CheckInBillProps> = ({
           </button>
         )}
 
+        {(reservation.status === 'pending' || reservation.status === 'confirmed') && (
+          <button
+            type="button"
+            onClick={() => setIsCancelModalOpen(true)}
+            className="px-5 py-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-xs sm:text-sm flex items-center gap-2 border border-rose-200 transition cursor-pointer"
+          >
+            <ShieldAlert className="w-4 h-4 text-rose-600" />
+            <span>Hủy Đặt Bàn</span>
+          </button>
+        )}
+
         {onClose && (
           <button
             type="button"
@@ -611,6 +698,19 @@ export const CheckInBill: React.FC<CheckInBillProps> = ({
           </button>
         )}
       </div>
+
+      {/* Cancellation Modal */}
+      {isCancelModalOpen && (
+        <CancelReservationModal
+          isOpen={isCancelModalOpen}
+          onClose={() => setIsCancelModalOpen(false)}
+          reservation={reservation}
+          onCancelledSuccess={(updatedRes) => {
+            setReservation(updatedRes);
+          }}
+        />
+      )}
+
 
       {/* Table Self-Service & Digital Waiter Bell Modal */}
       <TableSelfServiceModal

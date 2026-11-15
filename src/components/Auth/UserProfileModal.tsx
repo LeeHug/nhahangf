@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   User, 
@@ -25,19 +25,26 @@ import {
   Eye,
   ShieldCheck,
   Tag,
-  QrCode
+  QrCode,
+  History,
+  ArrowUpRight,
+  ArrowDownRight,
+  RefreshCw
 } from 'lucide-react';
-import { UserAccount, Reservation, MenuItem } from '../../types';
+import { UserAccount, Reservation, MenuItem, PointsTransaction } from '../../types';
 import { INITIAL_VOUCHERS, MENU_ITEMS } from '../../data/mockData';
 import { CheckInBillModal } from '../BookingFlow/CheckInBillModal';
+import { CancelReservationModal } from '../BookingFlow/CancelReservationModal';
 import { 
   formatVND, 
   updateUserProfile, 
   changeUserPassword, 
   downloadIcsCalendar, 
   updateReservationStatus,
-  toggleFavoriteDish 
+  toggleFavoriteDish,
+  getStoredPointsTransactions
 } from '../../services/storage';
+import { apiService } from '../../services/api';
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -81,6 +88,28 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
   // Selected reservation for Check-in bill
   const [selectedCheckInRes, setSelectedCheckInRes] = useState<Reservation | null>(null);
+  const [cancelModalReservation, setCancelModalReservation] = useState<Reservation | null>(null);
+
+  // Points Transaction Ledger (Mục 3)
+  const [pointsLedger, setPointsLedger] = useState<PointsTransaction[]>([]);
+
+  useEffect(() => {
+    if (!isOpen || !currentUser?.id) return;
+    const localTxs = getStoredPointsTransactions(currentUser.id);
+    setPointsLedger(localTxs);
+
+    apiService.getPointsLedger(currentUser.id).then((serverTxs) => {
+      if (serverTxs && serverTxs.length > 0) {
+        // Merge without duplicates by id
+        const map = new Map<string, PointsTransaction>();
+        [...serverTxs, ...localTxs].forEach((tx) => map.set(tx.id, tx));
+        const merged = Array.from(map.values()).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        setPointsLedger(merged);
+      }
+    }).catch(() => {});
+  }, [isOpen, currentUser?.id, currentUser?.loyaltyPoints]);
 
   // Filter reservations matching user
   const userEmail = (currentUser?.email || '').trim().toLowerCase();
@@ -96,8 +125,6 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
   // Favorite dishes
   const favoriteDishes = MENU_ITEMS.filter(item => (currentUser.favoriteDishIds || []).includes(item.id));
-
-  if (!isOpen) return null;
 
   // Handle profile info update
   const handleSaveProfile = (e: React.FormEvent) => {
@@ -151,16 +178,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     }
   };
 
-  // Handle cancel reservation
-  const handleCancelReservation = (reservationId: string) => {
-    if (window.confirm('Quý khách có chắc chắn muốn hủy đơn đặt bàn này không?')) {
-      const res = updateReservationStatus(reservationId, 'cancelled');
-      if (res.updated) {
-        // Trigger rerender via reload or storage event
-        window.dispatchEvent(new Event('storage'));
-      }
-    }
-  };
+  if (!isOpen) return null;
+
 
   const handleCopyVoucher = (code: string) => {
     navigator.clipboard.writeText(code);
@@ -175,16 +194,20 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     }
   };
 
-  // Calculate tier progress
+  // Calculate tier progress: Đồng (0-399) -> Bạc (400-999) -> Vàng (1000-2499) -> Kim Cương (2500+)
   const points = currentUser.loyaltyPoints || 0;
-  let nextTierName = 'Vàng';
+  let nextTierName = 'Bạc';
   let pointsToNext = Math.max(0, 400 - points);
   let progressPercent = Math.min(100, Math.round((points / 400) * 100));
 
-  if (currentUser.membershipTier === 'Vàng') {
+  if (currentUser.membershipTier === 'Bạc' || (points >= 400 && points < 1000 && currentUser.membershipTier !== 'Vàng' && currentUser.membershipTier !== 'Kim Cương')) {
+    nextTierName = 'Vàng';
+    pointsToNext = Math.max(0, 1000 - points);
+    progressPercent = Math.min(100, Math.max(0, Math.round(((points - 400) / 600) * 100)));
+  } else if (currentUser.membershipTier === 'Vàng') {
     nextTierName = 'Kim Cương';
-    pointsToNext = Math.max(0, 1500 - points);
-    progressPercent = Math.min(100, Math.round(((points - 400) / 1100) * 100));
+    pointsToNext = Math.max(0, 2500 - points);
+    progressPercent = Math.min(100, Math.max(0, Math.round(((points - 1000) / 1500) * 100)));
   } else if (currentUser.membershipTier === 'Kim Cương') {
     nextTierName = 'Đẳng Cấp Tối Thượng';
     pointsToNext = 0;
@@ -450,8 +473,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
                           {(res.status === 'pending' || res.status === 'confirmed') && (
                             <button
-                              onClick={() => handleCancelReservation(res.id)}
-                              className="px-3 py-1.5 text-rose-600 hover:bg-rose-50 border border-rose-200 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1"
+                              onClick={() => setCancelModalReservation(res)}
+                              className="px-3 py-1.5 text-rose-600 hover:bg-rose-50 border border-rose-200 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                               <span>Hủy Đặt Bàn</span>
@@ -579,6 +602,99 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Points Transaction Ledger (Mục 3) */}
+              <div className="space-y-3 pt-2 border-t border-stone-200">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-serif-heading font-bold text-base text-stone-900 flex items-center gap-2">
+                    <History className="w-4 h-4 text-amber-600" />
+                    Sổ Cái Biến Động Điểm Thưởng
+                  </h4>
+                  <span className="text-xs text-stone-500">{pointsLedger.length} giao dịch gần nhất</span>
+                </div>
+
+                {pointsLedger.length === 0 ? (
+                  <div className="bg-stone-50 border border-dashed border-stone-200 rounded-2xl p-6 text-center text-xs text-stone-500">
+                    Chưa có lịch sử biến động điểm nào. Điểm sẽ được tự động cộng sau khi quý khách hoàn tất dùng bữa tại nhà hàng.
+                  </div>
+                ) : (
+                  <div className="bg-white border border-stone-200 rounded-2xl divide-y divide-stone-100 overflow-hidden shadow-sm">
+                    {pointsLedger.map((tx) => {
+                      const isPositive = tx.amount >= 0;
+                      const typeLabel =
+                        tx.type === 'earn'
+                          ? 'Tích điểm dùng bữa'
+                          : tx.type === 'redeem'
+                          ? 'Tiêu điểm giảm giá'
+                          : tx.type === 'refund'
+                          ? 'Hoàn điểm hủy đơn'
+                          : 'Thưởng thành viên';
+                      const TypeIcon =
+                        tx.type === 'refund'
+                          ? RefreshCw
+                          : isPositive
+                          ? ArrowUpRight
+                          : ArrowDownRight;
+
+                      return (
+                        <div
+                          key={tx.id}
+                          className="p-3.5 flex items-center justify-between gap-3 hover:bg-stone-50/80 transition-colors"
+                        >
+                          <div className="flex items-start gap-3 min-w-0">
+                            <div
+                              className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                                isPositive
+                                  ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                                  : 'bg-rose-50 text-rose-600 border border-rose-200'
+                              }`}
+                            >
+                              <TypeIcon className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs font-bold text-stone-900 truncate">
+                                  {tx.description}
+                                </span>
+                                <span
+                                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                                    isPositive
+                                      ? 'bg-emerald-50 text-emerald-700'
+                                      : 'bg-rose-50 text-rose-700'
+                                  }`}
+                                >
+                                  {typeLabel}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-stone-400 mt-0.5 flex items-center gap-2">
+                                <span>{new Date(tx.createdAt).toLocaleString('vi-VN')}</span>
+                                {tx.bookingCode && (
+                                  <span className="font-mono text-amber-700 font-semibold">
+                                    #{tx.bookingCode}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span
+                              className={`font-mono font-extrabold text-sm block ${
+                                isPositive ? 'text-emerald-600' : 'text-rose-600'
+                              }`}
+                            >
+                              {isPositive ? `+${tx.amount}` : tx.amount} điểm
+                            </span>
+                            <span className="text-[10px] text-stone-400 font-mono">
+                              Số dư: {tx.balanceAfter}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -827,6 +943,19 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             reservation={selectedCheckInRes}
             onClose={() => setSelectedCheckInRes(null)}
             onOpenEmailPreview={onSelectReservationForPreview}
+          />
+        )}
+
+        {/* Cancellation Modal */}
+        {cancelModalReservation && (
+          <CancelReservationModal
+            isOpen={Boolean(cancelModalReservation)}
+            onClose={() => setCancelModalReservation(null)}
+            reservation={cancelModalReservation}
+            onCancelledSuccess={(updated) => {
+              setCancelModalReservation(null);
+              window.dispatchEvent(new Event('storage'));
+            }}
           />
         )}
       </div>

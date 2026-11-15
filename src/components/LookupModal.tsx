@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { X, Search, CheckCircle, Clock, Calendar, Users, Armchair, AlertCircle, Eye, Download, QrCode, Receipt, ShieldCheck } from 'lucide-react';
+import { X, Search, CheckCircle, Clock, Calendar, Users, Armchair, AlertCircle, Eye, Download, QrCode, Receipt, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { Reservation } from '../types';
 import { formatVND, downloadIcsCalendar } from '../services/storage';
 import { apiService } from '../services/api';
 import { CheckInBillModal } from './BookingFlow/CheckInBillModal';
+import { CancelReservationModal } from './BookingFlow/CancelReservationModal';
 
 interface LookupModalProps {
   reservations: Reservation[];
@@ -23,6 +24,7 @@ export const LookupModal: React.FC<LookupModalProps> = ({
   const [errorMessage, setErrorMessage] = useState('');
   const [matchedReservation, setMatchedReservation] = useState<Reservation | null>(null);
   const [selectedCheckInRes, setSelectedCheckInRes] = useState<Reservation | null>(null);
+  const [cancelModalRes, setCancelModalRes] = useState<Reservation | null>(null);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -234,6 +236,16 @@ export const LookupModal: React.FC<LookupModalProps> = ({
                   <Calendar className="w-3.5 h-3.5" />
                   <span>Lịch .ics</span>
                 </button>
+                {(matchedReservation.status === 'pending' || matchedReservation.status === 'confirmed') && (
+                  <button
+                    type="button"
+                    onClick={() => setCancelModalRes(matchedReservation)}
+                    className="px-3.5 py-1.5 rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Hủy Đặt Bàn</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -244,6 +256,19 @@ export const LookupModal: React.FC<LookupModalProps> = ({
           <CheckInBillModal
             reservation={selectedCheckInRes}
             onClose={() => setSelectedCheckInRes(null)}
+          />
+        )}
+
+        {/* Cancellation Modal integration */}
+        {cancelModalRes && (
+          <CancelReservationModal
+            isOpen={Boolean(cancelModalRes)}
+            onClose={() => setCancelModalRes(null)}
+            reservation={cancelModalRes}
+            onCancelledSuccess={(updatedRes) => {
+              setMatchedReservation(updatedRes);
+              setCancelModalRes(null);
+            }}
           />
         )}
       </div>

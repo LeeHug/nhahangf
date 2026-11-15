@@ -124,20 +124,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="hidden sm:inline whitespace-nowrap">Thực Đơn</span>
               </button>
 
-              {/* Only show Admin tab in navbar if logged in as Admin/Staff OR actively in admin view */}
+              {/* Only show Admin / Staff tab in navbar if logged in as Admin/Staff OR actively in admin view */}
               {(isAdminOrStaff || currentView === 'admin') && (
                 <button
                   id="nav-admin-mode-btn"
                   onClick={() => onViewChange('admin')}
                   className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all relative ${
                     currentView === 'admin'
-                      ? 'bg-amber-600 text-stone-950 font-bold shadow-md shadow-amber-900/40'
+                      ? (currentUser?.role === 'staff' ? 'bg-blue-600 text-white font-bold shadow-md shadow-blue-900/40' : 'bg-amber-600 text-stone-950 font-bold shadow-md shadow-amber-900/40')
                       : 'text-stone-300 hover:text-stone-100 hover:bg-stone-700/50'
                   }`}
-                  title="Cổng Quản Trị Nhà Hàng (Dành cho Quản lý & Nhân viên)"
+                  title={currentUser?.role === 'staff' ? "Bàn Vận Hành Nhân Viên (Staff Desk)" : "Cổng Quản Trị Nhà Hàng (Admin Portal)"}
                 >
-                  <ShieldCheck className="w-4 h-4 shrink-0 text-amber-400" />
-                  <span className="hidden xl:inline whitespace-nowrap">Quản Trị</span>
+                  {currentUser?.role === 'staff' ? (
+                    <Users className="w-4 h-4 shrink-0 text-blue-300" />
+                  ) : (
+                    <ShieldCheck className="w-4 h-4 shrink-0 text-amber-400" />
+                  )}
+                  <span className="hidden xl:inline whitespace-nowrap">
+                    {currentUser?.role === 'staff' ? 'Bàn Vận Hành' : 'Quản Trị'}
+                  </span>
                   {todayBookingsCount > 0 && (
                     <span className="ml-0.5 px-1.5 py-0.2 text-[9px] sm:text-[10px] font-bold rounded-full bg-emerald-500 text-stone-950">
                       {todayBookingsCount}

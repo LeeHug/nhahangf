@@ -10,6 +10,7 @@ import {
   saveStoredEmailLogs,
   formatVND,
   getCurrentUser,
+  saveCurrentUser,
   logoutUser,
   toggleFavoriteDish,
   deleteEmailLog,
@@ -91,8 +92,17 @@ export default function App() {
 
     setReservations(loadedReservations);
     setTables(loadedTables);
-    setEmailLogs(loadedEmails);
-    setCurrentUser(loadedUser);
+    if (loadedUser) {
+      setCurrentUser(loadedUser);
+    }
+
+    // Verify session with server if token exists
+    apiService.verifyCurrentUser().then(verified => {
+      if (verified) {
+        setCurrentUser(verified);
+        saveCurrentUser(verified);
+      }
+    }).catch(() => {});
 
     // Fetch live data from Cloud SQL backend
     async function syncCloudSql() {
@@ -121,6 +131,18 @@ export default function App() {
     }
 
     syncCloudSql();
+
+    const handleSyncStorage = () => {
+      setReservations(getStoredReservations());
+      setTables(getStoredTables());
+      setEmailLogs(getStoredEmailLogs());
+      const syncedUser = getCurrentUser();
+      if (syncedUser) {
+        setCurrentUser(syncedUser);
+      }
+    };
+    window.addEventListener('storage', handleSyncStorage);
+    return () => window.removeEventListener('storage', handleSyncStorage);
   }, []);
 
   const triggerToast = (title: string, desc: string) => {
@@ -131,12 +153,29 @@ export default function App() {
   };
 
   // User Auth Handlers
-  const handleLoginSuccess = (user: UserAccount) => {
+  const handleLoginSuccess = async (user: UserAccount) => {
+    saveCurrentUser(user);
     setCurrentUser(user);
     triggerToast(
       `Chào Mừng Trở Lại!`,
       `Đăng nhập thành công với tài khoản ${user.name} (Hạng ${user.membershipTier} - ${user.loyaltyPoints} điểm).`
     );
+
+    // Đồng bộ trực tiếp dữ liệu từ PostgreSQL cho tài khoản Admin & Staff
+    if (user.role === 'admin' || user.role === 'staff') {
+      try {
+        const [resList, emailList, tableList] = await Promise.all([
+          apiService.getReservations(),
+          apiService.getEmailLogs(),
+          apiService.getTables(),
+        ]);
+        if (resList && resList.length > 0) setReservations(resList);
+        if (emailList && emailList.length > 0) setEmailLogs(emailList);
+        if (tableList && tableList.length > 0) setTables(tableList);
+      } catch (err) {
+        console.warn('Sync live data from SQL on login notice:', err);
+      }
+    }
   };
 
   const handleLogout = () => {
@@ -216,13 +255,79 @@ export default function App() {
     userId?: string;
     voucherCode?: string;
     discountAmount?: number;
+    pointsRedeemed?: number;
+    pointsDiscount?: number;
   }): Promise<Reservation> => {
     const selectedTable = tables.find((t) => t.id === selectedTableId);
     const preOrderTotal = selectedDishes.reduce(
       (sum, item) => sum + item.dish.price * item.quantity,
       0
     );
+    const computedFinalTotal = Math.max(
+      0,
+      preOrderTotal - (customerData.discountAmount || 0) - (customerData.pointsDiscount || 0)
+    );
 
+    // 1. Ưu tiên lưu trực tiếp vào cơ sở dữ liệu PostgreSQL thông qua Backend API
+    let savedReservation: Reservation | null = null;
+    try {
+      const serverCreated = await apiService.createReservation({
+        customerName: customerData.name,
+        customerPhone: customerData.phone,
+        customerEmail: customerData.email,
+        guestCount,
+        bookingDate: selectedDate,
+        arrivalTime: selectedTime,
+        tableId: selectedTableId,
+        tableName: selectedTable?.name || 'Bàn Tiêu Chuẩn',
+        tableArea: selectedArea,
+        selectedDishes,
+        preOrderTotal,
+        depositAmount: customerData.depositAmount,
+        totalAmount: computedFinalTotal,
+        specialRequests: customerData.specialRequests,
+        occasion: selectedOccasion,
+        userId: customerData.userId || currentUser?.id,
+        voucherCode: customerData.voucherCode,
+        discountAmount: customerData.discountAmount,
+        pointsRedeemed: customerData.pointsRedeemed,
+        pointsDiscount: customerData.pointsDiscount,
+      } as any);
+
+      if (serverCreated) {
+        savedReservation = serverCreated;
+      }
+    } catch (err) {
+      console.warn('Backend PostgreSQL creation error, fallback to local storage:', err);
+    }
+
+    if (savedReservation) {
+      // Cập nhật state với bản ghi đã lưu trong PostgreSQL
+      const currentList = getStoredReservations();
+      const updatedList = [savedReservation, ...currentList.filter(r => r.id !== savedReservation!.id && r.bookingCode !== savedReservation!.bookingCode)];
+      saveStoredReservations(updatedList);
+      setReservations(updatedList);
+      setTables(getStoredTables());
+
+      const activeSessionUser = getCurrentUser() || currentUser;
+      if (activeSessionUser) {
+        const redeemed = savedReservation.pointsRedeemed || customerData.pointsRedeemed || 0;
+        const updatedUser = redeemed > 0
+          ? { ...activeSessionUser, loyaltyPoints: Math.max(0, (activeSessionUser.loyaltyPoints || 0) - redeemed) }
+          : activeSessionUser;
+        setCurrentUser(updatedUser);
+        saveCurrentUser(updatedUser);
+      }
+
+      triggerToast(
+        `✨ Đã Gửi Yêu Cầu Đặt Bàn #${savedReservation.bookingCode}`,
+        `Hệ thống đã lưu vào cơ sở dữ liệu PostgreSQL và chuyển giao thông báo đến ${customerData.email}.`
+      );
+
+      return savedReservation;
+    }
+
+    // 2. Chế độ fallback nếu máy chủ chưa bật PostgreSQL
     const { reservation, emailLog } = addNewReservation({
       customerName: customerData.name,
       customerPhone: customerData.phone,
@@ -236,19 +341,25 @@ export default function App() {
       selectedDishes,
       preOrderTotal,
       depositAmount: customerData.depositAmount,
-      totalAmount: preOrderTotal,
+      totalAmount: computedFinalTotal,
       specialRequests: customerData.specialRequests,
       occasion: selectedOccasion,
       userId: customerData.userId || currentUser?.id,
       voucherCode: customerData.voucherCode,
       discountAmount: customerData.discountAmount,
+      pointsRedeemed: customerData.pointsRedeemed,
+      pointsDiscount: customerData.pointsDiscount,
     });
 
-    // Update state and refresh current user
+    // Update state and safely preserve logged-in user session
     setReservations(getStoredReservations());
     setTables(getStoredTables());
     setEmailLogs(getStoredEmailLogs());
-    setCurrentUser(getCurrentUser());
+    const activeSessionUser = getCurrentUser() || currentUser;
+    if (activeSessionUser) {
+      setCurrentUser(activeSessionUser);
+      saveCurrentUser(activeSessionUser);
+    }
 
     // Sync to Cloud SQL database in background
     apiService.createReservation(reservation).catch(console.error);
@@ -269,6 +380,10 @@ export default function App() {
       setReservations(getStoredReservations());
       setTables(getStoredTables());
       setEmailLogs(getStoredEmailLogs());
+      const syncedUser = getCurrentUser();
+      if (syncedUser) {
+        setCurrentUser(syncedUser);
+      }
 
       // Sync status change to Cloud SQL
       apiService.updateReservationStatus(reservationId, newStatus).catch(console.error);
